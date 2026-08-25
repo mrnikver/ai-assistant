@@ -1,0 +1,15 @@
+# Maven
+target/
+
+# IntelliJ build output
+out/
+
+# IntelliJ
+.idea/
+*.iml
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
