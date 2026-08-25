@@ -39,7 +39,7 @@ public class RunbookRetriever implements KnowledgeRetriever {
             }
 
             QdrantSearchResult result = results.get(0);
-
+            //TODO:  add minimum retrieval score
             System.out.println(
                     "Retrieved score: "
                             + result.score()

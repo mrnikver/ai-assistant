@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "properties": {
+    "shouldStore": {
+      "type": "boolean"
+    },
+    "key": {
+      "type": ["string", "null"],
+      "enum": [
+        "PRODUCTION_REGION",
+        "DEFAULT_SERVICE",
+        null
+      ]
+    },
+    "value": {
+      "type": ["string", "null"]
+    }
+  },
+  "required": [
+    "shouldStore",
+    "key",
+    "value"
+  ]
+}

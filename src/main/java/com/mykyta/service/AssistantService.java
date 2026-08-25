@@ -2,8 +2,10 @@ package com.mykyta.service;
 
 import com.mykyta.client.LLMClient;
 import com.mykyta.config.AssistantProperties;
+import com.mykyta.memory.Memory;
 import com.mykyta.model.AssistantResponse;
 import com.mykyta.model.LLMMessage;
+import com.mykyta.model.MemoryExtractionResponse;
 import com.mykyta.rag.KnowledgeRetriever;
 import com.mykyta.tool.ToolDispatcher;
 import com.mykyta.util.JsonResourceLoader;
@@ -12,6 +14,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class AssistantService {
@@ -29,6 +32,8 @@ public class AssistantService {
     private final AgentService agentService;
     private final AssistantProperties assistantProperties;
     private final KnowledgeRetriever knowledgeRetriever;
+    private final MemoryService memoryService;
+    private final MemoryExtractorService memoryExtractorService;
 
 
     public AssistantService(
@@ -37,7 +42,7 @@ public class AssistantService {
             JsonResourceLoader jsonResourceLoader,
             AgentService agentService,
             AssistantProperties assistantProperties,
-            KnowledgeRetriever knowledgeRetriever
+            KnowledgeRetriever knowledgeRetriever, MemoryService memoryService, MemoryExtractorService memoryExtractorService
     ) {
         this.llmClient = llmClient;
         this.conversationService = conversationService;
@@ -45,6 +50,8 @@ public class AssistantService {
         this.agentService = agentService;
         this.assistantProperties = assistantProperties;
         this.knowledgeRetriever = knowledgeRetriever;
+        this.memoryService = memoryService;
+        this.memoryExtractorService = memoryExtractorService;
     }
 
     public AssistantResponse chat(
@@ -54,12 +61,47 @@ public class AssistantService {
 
         List<LLMMessage> context = new ArrayList<>();
 
+        // 1. Extract persistent memory from the current user message
+        MemoryExtractionResponse memoryCandidate =
+                memoryExtractorService.extract(userMessage);
+
+        System.out.println("Memory candidate: " + memoryCandidate);
+
+        if (memoryCandidate.shouldStore()) {
+            memoryService.save(
+                    memoryCandidate.key(),
+                    memoryCandidate.value()
+            );
+        }
+
         context.add(
                 new LLMMessage(
                         "system",
                         SYSTEM_PROMPT
                 )
         );
+
+        List<Memory> memories = memoryService.getAll();
+
+        if (!memories.isEmpty()) {
+
+            String memoryContext = memories.stream()
+                    .map(memory -> memory.getKey() + ": " + memory.getValue())
+                    .collect(Collectors.joining("\n"));
+
+            context.add(
+                    new LLMMessage(
+                            "system",
+                            """
+                            Persistent application memory:
+        
+                            %s
+        
+                            Use this information when it is relevant to the user's request.
+                            """.formatted(memoryContext)
+                    )
+            );
+        }
 
         String retrievedKnowledge = knowledgeRetriever.retrieve(
                         userMessage
