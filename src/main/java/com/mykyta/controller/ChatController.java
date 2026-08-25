@@ -1,7 +1,7 @@
 package com.mykyta.controller;
 
 import com.mykyta.controller.wrapper.ChatRequest;
-import com.mykyta.controller.wrapper.ChatResponse;
+import com.mykyta.model.AssistantResponse;
 import com.mykyta.service.AssistantService;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -17,13 +17,11 @@ public class ChatController {
     }
 
     @PostMapping("/chat")
-    public ChatResponse chat(@RequestBody ChatRequest request) throws Exception {
+    public AssistantResponse chat(@RequestBody ChatRequest request) throws Exception {
 
-        String answer = assistantService.chat(
+        return assistantService.chat(
                 request.conversationId(),
                 request.message()
         );
-
-        return new ChatResponse(answer);
     }
 }

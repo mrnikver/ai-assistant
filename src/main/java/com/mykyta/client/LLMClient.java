@@ -2,6 +2,7 @@ package com.mykyta.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mykyta.model.AssistantResponse;
 import com.mykyta.model.LLMMessage;
 
 import java.io.IOException;
@@ -26,12 +27,13 @@ public class LLMClient {
         this.model = model;
     }
 
-    public String chat(List<LLMMessage> messages) throws IOException, InterruptedException {
+    public AssistantResponse chat(List<LLMMessage> messages) throws IOException, InterruptedException {
 
         Map<String, Object> body = Map.of(
                 "model", model,
                 "messages", messages,
-                "stream", false
+                "stream", false,
+                "format", getStructuredOutput()
         );
 
         String json = objectMapper.writeValueAsString(body);
@@ -43,9 +45,9 @@ public class LLMClient {
                 .build();
 
         HttpResponse<String> response = httpClient.send(
-                        request,
-                        HttpResponse.BodyHandlers.ofString()
-                );
+                request,
+                HttpResponse.BodyHandlers.ofString()
+        );
 
         if (response.statusCode() != 200) {
             throw new RuntimeException(
@@ -58,9 +60,32 @@ public class LLMClient {
 
         JsonNode jsonResponse = objectMapper.readTree(response.body());
 
-        return jsonResponse
+        String content = jsonResponse
                 .get("message")
                 .get("content")
                 .asText();
+
+        return objectMapper.readValue(
+                content,
+                AssistantResponse.class
+        );
+    }
+
+    private Map<String, Object> getStructuredOutput() {
+        return Map.of("type", "object",
+                "properties", Map.of(
+                        "answer", Map.of(
+                                "type", "string"
+                        ),
+                        "confidence", Map.of(
+                                "type", "string",
+                                "enum", List.of("LOW", "MEDIUM", "HIGH")
+                        )
+                ),
+                "required", List.of(
+                        "answer",
+                        "confidence"
+                )
+        );
     }
 }
