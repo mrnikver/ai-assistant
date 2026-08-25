@@ -1,6 +1,6 @@
 package com.mykyta.model;
 
-public record AssistantResponse(
+public record  AssistantResponse(
         String answer,
         Confidence confidence
 ) {}

@@ -71,6 +71,52 @@ public class LLMClient {
         );
     }
 
+    public LLMMessage chatWithTools(
+            List<LLMMessage> messages,
+            List<Map<String, Object>> tools
+    ) throws IOException, InterruptedException {
+
+        Map<String, Object> body = Map.of(
+                "model", model,
+                "messages", messages,
+                "tools", tools,
+                "stream", false
+        );
+
+        String json = objectMapper.writeValueAsString(body);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/api/chat"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(
+                request,
+                HttpResponse.BodyHandlers.ofString()
+        );
+
+        if (response.statusCode() != 200) {
+            throw new RuntimeException(
+                    "LLM request failed: "
+                            + response.statusCode()
+                            + " "
+                            + response.body()
+            );
+        }
+
+        JsonNode jsonResponse =
+                objectMapper.readTree(response.body());
+
+        JsonNode message =
+                jsonResponse.path("message");
+
+        return objectMapper.treeToValue(
+                message,
+                LLMMessage.class
+        );
+    }
+
     private Map<String, Object> getStructuredOutput() {
         return Map.of("type", "object",
                 "properties", Map.of(
