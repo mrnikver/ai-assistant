@@ -1,11 +1,16 @@
 package com.mykyta.controller;
 
 import com.mykyta.controller.wrapper.ChatRequest;
+import com.mykyta.controller.wrapper.ChatResponse;
 import com.mykyta.model.AssistantResponse;
 import com.mykyta.service.AssistantService;
+import jakarta.validation.Valid;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.UUID;
 
 @RestController
 public class ChatController {
@@ -17,11 +22,24 @@ public class ChatController {
     }
 
     @PostMapping("/chat")
-    public AssistantResponse chat(@RequestBody ChatRequest request) throws Exception {
+    public ChatResponse chat(@Valid @RequestBody ChatRequest request) throws Exception {
+        String conversationId = resolveConversationId(request);
 
-        return assistantService.chat(
-                request.conversationId(),
+        AssistantResponse response = assistantService.chat(
+                conversationId,
                 request.message()
         );
+
+        return new ChatResponse(
+                conversationId,
+                response.answer(),
+                response.confidence()
+        );
+    }
+
+    private String resolveConversationId(ChatRequest request) {
+        return StringUtils.hasText(request.conversationId())
+                ? request.conversationId()
+                : UUID.randomUUID().toString();
     }
 }

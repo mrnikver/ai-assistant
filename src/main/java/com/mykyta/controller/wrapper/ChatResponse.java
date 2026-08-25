@@ -1,5 +1,10 @@
 package com.mykyta.controller.wrapper;
 
+import com.mykyta.model.Confidence;
+
 public record ChatResponse(
-        String answer
-) {}
+        String conversationId,
+        String answer,
+        Confidence confidence
+) {
+}
