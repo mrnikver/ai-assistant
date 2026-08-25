@@ -16,6 +16,8 @@ public class AssistantService {
             Keep answers concise and technical.
             """;
 
+    private static final int HISTORY_LIMIT = 10;
+
     private final LLMClient llmClient;
     private final ConversationService conversationService;
 
@@ -38,7 +40,7 @@ public class AssistantService {
 
         // 2. Previous conversation
         context.addAll(
-                conversationService.getHistory(conversationId)
+                conversationService.getRecentMessages(conversationId, HISTORY_LIMIT)
         );
 
         // 3. Current user userMessage
