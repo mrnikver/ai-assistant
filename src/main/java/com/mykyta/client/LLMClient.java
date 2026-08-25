@@ -2,6 +2,7 @@ package com.mykyta.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mykyta.model.OllamaChatRequest;
 import com.mykyta.model.AssistantResponse;
 import com.mykyta.model.LLMMessage;
 
@@ -19,50 +20,39 @@ public class LLMClient {
     private final ObjectMapper objectMapper;
     private final String baseUrl;
     private final String model;
+    private final Map<String, Object> structuredOutputSchema;
 
-    public LLMClient(String baseUrl, String model) {
+    public LLMClient(
+            String baseUrl,
+            String model,
+            ObjectMapper objectMapper,
+            Map<String, Object> structuredOutputSchema
+    ) {
         this.httpClient = HttpClient.newHttpClient();
-        this.objectMapper = new ObjectMapper();
+        this.objectMapper = objectMapper;
         this.baseUrl = baseUrl;
         this.model = model;
+        this.structuredOutputSchema = structuredOutputSchema;
     }
 
-    public AssistantResponse chat(List<LLMMessage> messages) throws IOException, InterruptedException {
+    public AssistantResponse chat(
+            List<LLMMessage> messages
+    ) throws IOException, InterruptedException {
 
-        Map<String, Object> body = Map.of(
-                "model", model,
-                "messages", messages,
-                "stream", false,
-                "format", getStructuredOutput()
-        );
+        OllamaChatRequest body =
+                new OllamaChatRequest(
+                        model,
+                        messages,
+                        false,
+                        structuredOutputSchema,
+                        null
+                );
 
-        String json = objectMapper.writeValueAsString(body);
+        JsonNode response = send(body);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/api/chat"))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(json))
-                .build();
-
-        HttpResponse<String> response = httpClient.send(
-                request,
-                HttpResponse.BodyHandlers.ofString()
-        );
-
-        if (response.statusCode() != 200) {
-            throw new RuntimeException(
-                    "LLM request failed: "
-                            + response.statusCode()
-                            + " "
-                            + response.body()
-            );
-        }
-
-        JsonNode jsonResponse = objectMapper.readTree(response.body());
-
-        String content = jsonResponse
-                .get("message")
-                .get("content")
+        String content = response
+                .path("message")
+                .path("content")
                 .asText();
 
         return objectMapper.readValue(
@@ -76,14 +66,29 @@ public class LLMClient {
             List<Map<String, Object>> tools
     ) throws IOException, InterruptedException {
 
-        Map<String, Object> body = Map.of(
-                "model", model,
-                "messages", messages,
-                "tools", tools,
-                "stream", false
-        );
+        OllamaChatRequest body =
+                new OllamaChatRequest(
+                        model,
+                        messages,
+                        false,
+                        null,
+                        tools
+                );
 
-        String json = objectMapper.writeValueAsString(body);
+        JsonNode response = send(body);
+
+        return objectMapper.treeToValue(
+                response.path("message"),
+                LLMMessage.class
+        );
+    }
+
+    private JsonNode send(
+            OllamaChatRequest body
+    ) throws IOException, InterruptedException {
+
+        String json =
+                objectMapper.writeValueAsString(body);
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/api/chat"))
@@ -91,10 +96,11 @@ public class LLMClient {
                 .POST(HttpRequest.BodyPublishers.ofString(json))
                 .build();
 
-        HttpResponse<String> response = httpClient.send(
-                request,
-                HttpResponse.BodyHandlers.ofString()
-        );
+        HttpResponse<String> response =
+                httpClient.send(
+                        request,
+                        HttpResponse.BodyHandlers.ofString()
+                );
 
         if (response.statusCode() != 200) {
             throw new RuntimeException(
@@ -105,33 +111,8 @@ public class LLMClient {
             );
         }
 
-        JsonNode jsonResponse =
-                objectMapper.readTree(response.body());
-
-        JsonNode message =
-                jsonResponse.path("message");
-
-        return objectMapper.treeToValue(
-                message,
-                LLMMessage.class
-        );
-    }
-
-    private Map<String, Object> getStructuredOutput() {
-        return Map.of("type", "object",
-                "properties", Map.of(
-                        "answer", Map.of(
-                                "type", "string"
-                        ),
-                        "confidence", Map.of(
-                                "type", "string",
-                                "enum", List.of("LOW", "MEDIUM", "HIGH")
-                        )
-                ),
-                "required", List.of(
-                        "answer",
-                        "confidence"
-                )
+        return objectMapper.readTree(
+                response.body()
         );
     }
 }

@@ -1,6 +1,5 @@
 package com.mykyta.exception;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -24,8 +23,7 @@ public class GlobalExceptionHandler {
                 .map(error -> error.getField() + ": " + error.getDefaultMessage())
                 .orElse("Invalid request");
 
-        return ResponseEntity
-                .badRequest()
+        return ResponseEntity.badRequest()
                 .body(new ApplicationException(
                         "INVALID_REQUEST",
                         message,
@@ -37,8 +35,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApplicationException> handleMalformedJson(
             HttpMessageNotReadableException exception
     ) {
-        return ResponseEntity
-                .badRequest()
+        return ResponseEntity.badRequest()
                 .body(new ApplicationException(
                         "MALFORMED_JSON",
                         "Request body contains invalid JSON",
