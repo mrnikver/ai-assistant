@@ -4,7 +4,7 @@ import com.mykyta.client.LLMClient;
 import com.mykyta.model.AssistantResponse;
 import com.mykyta.model.LLMMessage;
 import com.mykyta.model.ToolCall;
-import com.mykyta.tool.ToolDefinitionLoader;
+import com.mykyta.util.JsonResourceLoader;
 import com.mykyta.tool.ToolDispatcher;
 import org.springframework.stereotype.Service;
 
@@ -25,18 +25,18 @@ public class AssistantService {
 
     private final LLMClient llmClient;
     private final ConversationService conversationService;
-    private final ToolDefinitionLoader toolDefinitionLoader;
+    private final JsonResourceLoader jsonResourceLoader;
     private final ToolDispatcher toolDispatcher;
 
 
     public AssistantService(
             LLMClient llmClient,
             ConversationService conversationService,
-            ToolDefinitionLoader toolDefinitionLoader, ToolDispatcher toolDispatcher
+            JsonResourceLoader jsonResourceLoader, ToolDispatcher toolDispatcher
     ) {
         this.llmClient = llmClient;
         this.conversationService = conversationService;
-        this.toolDefinitionLoader = toolDefinitionLoader;
+        this.jsonResourceLoader = jsonResourceLoader;
         this.toolDispatcher = toolDispatcher;
     }
 
@@ -68,8 +68,8 @@ public class AssistantService {
 
         // 4. Load available tools
         Map<String, Object> deploymentTool =
-                toolDefinitionLoader.load(
-                        "get-deployment-status.json"
+                jsonResourceLoader.load(
+                        "tools/get-deployment-status.json"
                 );
 
         List<Map<String, Object>> tools =
@@ -90,14 +90,17 @@ public class AssistantService {
 
             String toolName =
                     toolCall.function().name();
-            System.out.println(toolName + " call");
             Map<String, Object> arguments =
                     toolCall.function().arguments();
+
+            System.out.println(toolName + " call; args: "  + arguments.toString());
 
             String toolResult = toolDispatcher.execute(
                             toolName,
                             arguments
                     );
+
+            System.out.println("toolResult: " + toolResult);
 
             // Important:
             // add assistant tool request to context
