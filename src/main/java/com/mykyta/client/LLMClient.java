@@ -39,12 +39,25 @@ public class LLMClient {
             List<LLMMessage> messages
     ) throws IOException, InterruptedException {
 
+        return structuredChat(
+                messages,
+                structuredOutputSchema,
+                AssistantResponse.class
+        );
+    }
+
+    public <T> T structuredChat(
+            List<LLMMessage> messages,
+            Map<String, Object> schema,
+            Class<T> responseType
+    ) throws IOException, InterruptedException {
+
         OllamaChatRequest body =
                 new OllamaChatRequest(
                         model,
                         messages,
                         false,
-                        structuredOutputSchema,
+                        schema,
                         null
                 );
 
@@ -57,7 +70,7 @@ public class LLMClient {
 
         return objectMapper.readValue(
                 content,
-                AssistantResponse.class
+                responseType
         );
     }
 
