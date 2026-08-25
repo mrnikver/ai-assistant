@@ -3,9 +3,8 @@ package com.mykyta.service;
 import com.mykyta.client.LLMClient;
 import com.mykyta.model.AssistantResponse;
 import com.mykyta.model.LLMMessage;
-import com.mykyta.model.ToolCall;
-import com.mykyta.util.JsonResourceLoader;
 import com.mykyta.tool.ToolDispatcher;
+import com.mykyta.util.JsonResourceLoader;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -26,18 +25,20 @@ public class AssistantService {
     private final LLMClient llmClient;
     private final ConversationService conversationService;
     private final JsonResourceLoader jsonResourceLoader;
-    private final ToolDispatcher toolDispatcher;
+    private final AgentService agentService;
 
 
     public AssistantService(
             LLMClient llmClient,
             ConversationService conversationService,
-            JsonResourceLoader jsonResourceLoader, ToolDispatcher toolDispatcher
+            JsonResourceLoader jsonResourceLoader,
+            ToolDispatcher toolDispatcher,
+            AgentService agentService
     ) {
         this.llmClient = llmClient;
         this.conversationService = conversationService;
         this.jsonResourceLoader = jsonResourceLoader;
-        this.toolDispatcher = toolDispatcher;
+        this.agentService = agentService;
     }
 
     public AssistantResponse chat(
@@ -47,12 +48,13 @@ public class AssistantService {
 
         List<LLMMessage> context = new ArrayList<>();
 
-        // 1. System prompt
         context.add(
-                new LLMMessage("system", SYSTEM_PROMPT)
+                new LLMMessage(
+                        "system",
+                        SYSTEM_PROMPT
+                )
         );
 
-        // 2. Previous conversation
         context.addAll(
                 conversationService.getRecentMessages(
                         conversationId,
@@ -60,68 +62,28 @@ public class AssistantService {
                 )
         );
 
-        // 3. Current user message
         LLMMessage currentUserMessage =
-                new LLMMessage("user", userMessage);
+                new LLMMessage(
+                        "user",
+                        userMessage
+                );
 
         context.add(currentUserMessage);
 
-        // 4. Load available tools
         Map<String, Object> deploymentTool =
-                jsonResourceLoader.load(
-                        "tools/get-deployment-status.json"
-                );
+                jsonResourceLoader.load("tools/get-deployment-status.json");
 
-        List<Map<String, Object>> tools =
-                List.of(deploymentTool);
+        List<Map<String, Object>> tools = List.of(deploymentTool);
 
-        // 5. Ask LLM whether it needs a tool
-        LLMMessage llmResponse = llmClient.chatWithTools(
+        // Agent performs zero or more tool interactions.
+        agentService.run(
                 context,
                 tools
         );
 
-        List<ToolCall> toolCalls = llmResponse.toolCalls();
+        // Generate final structured response.
+        AssistantResponse answer = llmClient.chat(context);
 
-        // 6. Execute tool if requested
-        if (toolCalls != null && !toolCalls.isEmpty()) {
-
-            ToolCall toolCall = toolCalls.get(0);
-
-            String toolName =
-                    toolCall.function().name();
-            Map<String, Object> arguments =
-                    toolCall.function().arguments();
-
-            System.out.println(toolName + " call; args: "  + arguments.toString());
-
-            String toolResult = toolDispatcher.execute(
-                            toolName,
-                            arguments
-                    );
-
-            System.out.println("toolResult: " + toolResult);
-
-            // Important:
-            // add assistant tool request to context
-            context.add(llmResponse);
-
-            // add tool result to context
-            context.add(
-                    new LLMMessage(
-                            "tool",
-                            toolResult,
-                            null,
-                            toolName
-                    )
-            );
-        }
-
-        // 7. Generate final structured answer
-        AssistantResponse answer =
-                llmClient.chat(context);
-
-        // 8. Store conversation
         conversationService.add(
                 conversationId,
                 currentUserMessage
