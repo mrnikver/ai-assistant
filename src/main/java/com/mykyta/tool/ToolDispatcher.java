@@ -14,10 +14,19 @@ public class ToolDispatcher {
     }
 
     public String execute(String toolName, Map<String, Object> arguments) {
+
+        String serviceName =
+                (String) arguments.get("serviceName");
+
         return switch (toolName) {
             case "getDeploymentStatus" ->
                     deploymentTool.getDeploymentStatus(
                             (String) arguments.get("serviceName")
+                    );
+
+            case "getDeploymentLogs" ->
+                    deploymentTool.getDeploymentLogs(
+                            serviceName
                     );
 
             default ->

@@ -1,4 +1,4 @@
-package com.mykyta.controller.wrapper;
+package com.mykyta.model;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;

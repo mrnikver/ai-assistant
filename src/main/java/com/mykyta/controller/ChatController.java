@@ -1,10 +1,8 @@
 package com.mykyta.controller;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.mykyta.controller.wrapper.ChatRequest;
-import com.mykyta.controller.wrapper.ChatResponse;
+import com.mykyta.model.ChatRequest;
+import com.mykyta.model.ChatResponse;
 import com.mykyta.model.AssistantResponse;
-import com.mykyta.model.LLMMessage;
 import com.mykyta.service.AssistantService;
 import jakarta.validation.Valid;
 import org.springframework.util.StringUtils;

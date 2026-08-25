@@ -1,3 +1,9 @@
 llm:
   base-url: http://192.168.0.112:11434
   model: qwen3:8b
+
+assistant:
+  history-limit: 10
+
+agent:
+  max-iterations: 5
