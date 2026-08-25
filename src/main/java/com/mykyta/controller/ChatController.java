@@ -1,5 +1,6 @@
 package com.mykyta.controller;
 
+import com.mykyta.client.EmbeddingClient;
 import com.mykyta.model.ChatRequest;
 import com.mykyta.model.ChatResponse;
 import com.mykyta.model.AssistantResponse;
@@ -17,8 +18,11 @@ public class ChatController {
 
     private final AssistantService assistantService;
 
-    public ChatController(AssistantService assistantService) {
+    private final EmbeddingClient embeddingClient;
+
+    public ChatController(AssistantService assistantService, EmbeddingClient embeddingClient) {
         this.assistantService = assistantService;
+        this.embeddingClient = embeddingClient;
     }
 
     @PostMapping("/chat")
@@ -28,6 +32,16 @@ public class ChatController {
         AssistantResponse response = assistantService.chat(
                 conversationId,
                 request.message()
+        );
+
+        double[] embedding =
+                embeddingClient.embed(
+                        "Database connection refused"
+                );
+
+        System.out.println(
+                "Embedding dimensions: "
+                        + embedding.length
         );
 
         return new ChatResponse(

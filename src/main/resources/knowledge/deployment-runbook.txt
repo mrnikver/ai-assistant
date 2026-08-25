@@ -1,0 +1,17 @@
+Deployment Troubleshooting Runbook
+
+If a deployment fails with "Database connection refused":
+
+1. Verify that the database instance is running.
+2. Check database hostname and port configuration.
+3. Verify network connectivity between the service and database.
+4. Check security groups and firewall rules.
+5. Verify database credentials and secrets.
+6. Check whether the application is using the correct environment configuration.
+
+If a deployment is stuck in RUNNING state:
+
+1. Check deployment logs.
+2. Verify health check configuration.
+3. Check whether the new application instance becomes healthy.
+4. Inspect CPU and memory usage.
