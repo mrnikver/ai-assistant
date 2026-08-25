@@ -1,6 +1,7 @@
 package com.mykyta.service;
 
 import com.mykyta.client.LLMClient;
+import com.mykyta.model.AssistantResponse;
 import com.mykyta.model.LLMMessage;
 import org.springframework.stereotype.Service;
 
@@ -29,7 +30,7 @@ public class AssistantService {
         this.conversationService = conversationService;
     }
 
-    public String chat(String conversationId, String userMessage) throws Exception {
+    public AssistantResponse chat(String conversationId, String userMessage) throws Exception {
 
         List<LLMMessage> context = new ArrayList<>();
 
@@ -49,7 +50,7 @@ public class AssistantService {
         context.add(currentUserMessage);
 
         // 4. LLM call
-        String answer = llmClient.chat(context);
+        AssistantResponse answer = llmClient.chat(context);
 
         // 5. Save this interaction
         conversationService.add(
@@ -59,7 +60,7 @@ public class AssistantService {
 
         conversationService.add(
                 conversationId,
-                new LLMMessage("assistant", answer)
+                new LLMMessage("assistant", answer.answer())
         );
 
         return answer;
