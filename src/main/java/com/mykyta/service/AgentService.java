@@ -1,6 +1,7 @@
 package com.mykyta.service;
 
 import com.mykyta.client.LLMClient;
+import com.mykyta.config.AgentProperties;
 import com.mykyta.model.LLMMessage;
 import com.mykyta.model.ToolCall;
 import com.mykyta.tool.ToolDispatcher;
@@ -12,17 +13,18 @@ import java.util.Map;
 @Service
 public class AgentService {
 
-    private static final int MAX_AGENT_ITERATIONS = 5;
-
     private final LLMClient llmClient;
     private final ToolDispatcher toolDispatcher;
+    private final AgentProperties agentProperties;
 
     public AgentService(
             LLMClient llmClient,
-            ToolDispatcher toolDispatcher
+            ToolDispatcher toolDispatcher,
+            AgentProperties agentProperties
     ) {
         this.llmClient = llmClient;
         this.toolDispatcher = toolDispatcher;
+        this.agentProperties = agentProperties;
     }
 
     public void run(
@@ -30,52 +32,40 @@ public class AgentService {
             List<Map<String, Object>> tools
     ) throws Exception {
 
-        for (int iteration = 0;
-             iteration < MAX_AGENT_ITERATIONS;
-             iteration++) {
-
-            LLMMessage llmResponse =
-                    llmClient.chatWithTools(
+        for (int iteration = 0; iteration < agentProperties.maxIterations(); iteration++) {
+            LLMMessage llmResponse = llmClient.chatWithTools(
                             context,
                             tools
                     );
 
-            List<ToolCall> toolCalls =
-                    llmResponse.toolCalls();
+            List<ToolCall> toolCalls = llmResponse.toolCalls();
 
-            // No more actions required.
             if (toolCalls == null || toolCalls.isEmpty()) {
                 return;
             }
 
-            // Preserve assistant tool request in context.
             context.add(llmResponse);
 
-            ToolCall toolCall =
-                    toolCalls.get(0);
+            for (ToolCall toolCall : toolCalls) {
+                String toolName = toolCall.function().name();
 
-            String toolName =
-                    toolCall.function().name();
+                Map<String, Object> arguments = toolCall.function().arguments();
+                System.out.println(toolName + " call; args: " + arguments.toString());
+                String toolResult = toolDispatcher.execute(
+                        toolName,
+                        arguments
+                );
+                System.out.println("toolResult: " + toolResult);
 
-            Map<String, Object> arguments =
-                    toolCall.function().arguments();
-            System.out.println(toolName + " call; args: "  + arguments.toString());
-            String toolResult =
-                    toolDispatcher.execute(
-                            toolName,
-                            arguments
-                    );
-            System.out.println("toolResult: " + toolResult);
-
-            // Add tool observation back to context.
-            context.add(
-                    new LLMMessage(
-                            "tool",
-                            toolResult,
-                            null,
-                            toolName
-                    )
-            );
+                context.add(
+                        new LLMMessage(
+                                "tool",
+                                toolResult,
+                                null,
+                                toolName
+                        )
+                );
+            }
         }
     }
 }

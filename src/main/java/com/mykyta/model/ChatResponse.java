@@ -1,6 +1,4 @@
-package com.mykyta.controller.wrapper;
-
-import com.mykyta.model.Confidence;
+package com.mykyta.model;
 
 public record ChatResponse(
         String conversationId,

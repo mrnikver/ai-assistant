@@ -1,0 +1,19 @@
+{
+  "type": "function",
+  "function": {
+    "name": "getDeploymentLogs",
+    "description": "Get recent deployment logs for a service. Use this to investigate deployment failures.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "serviceName": {
+          "type": "string",
+          "description": "Name of the service"
+        }
+      },
+      "required": [
+        "serviceName"
+      ]
+    }
+  }
+}

@@ -1,6 +1,7 @@
 package com.mykyta.service;
 
 import com.mykyta.client.LLMClient;
+import com.mykyta.config.AssistantProperties;
 import com.mykyta.model.AssistantResponse;
 import com.mykyta.model.LLMMessage;
 import com.mykyta.tool.ToolDispatcher;
@@ -20,25 +21,26 @@ public class AssistantService {
             Keep answers concise and technical.
             """;
 
-    private static final int HISTORY_LIMIT = 10;
 
     private final LLMClient llmClient;
     private final ConversationService conversationService;
     private final JsonResourceLoader jsonResourceLoader;
     private final AgentService agentService;
+    private final AssistantProperties assistantProperties;
 
 
     public AssistantService(
             LLMClient llmClient,
             ConversationService conversationService,
             JsonResourceLoader jsonResourceLoader,
-            ToolDispatcher toolDispatcher,
-            AgentService agentService
+            AgentService agentService,
+            AssistantProperties assistantProperties
     ) {
         this.llmClient = llmClient;
         this.conversationService = conversationService;
         this.jsonResourceLoader = jsonResourceLoader;
         this.agentService = agentService;
+        this.assistantProperties = assistantProperties;
     }
 
     public AssistantResponse chat(
@@ -58,7 +60,7 @@ public class AssistantService {
         context.addAll(
                 conversationService.getRecentMessages(
                         conversationId,
-                        HISTORY_LIMIT
+                        assistantProperties.historyLimit()
                 )
         );
 
@@ -70,10 +72,21 @@ public class AssistantService {
 
         context.add(currentUserMessage);
 
-        Map<String, Object> deploymentTool =
-                jsonResourceLoader.load("tools/get-deployment-status.json");
+        Map<String, Object> deploymentStatusTool =
+                jsonResourceLoader.load(
+                        "tools/get-deployment-status.json"
+                );
 
-        List<Map<String, Object>> tools = List.of(deploymentTool);
+        Map<String, Object> deploymentLogsTool =
+                jsonResourceLoader.load(
+                        "tools/get-deployment-logs.json"
+                );
+
+        List<Map<String, Object>> tools =
+                List.of(
+                        deploymentStatusTool,
+                        deploymentLogsTool
+                );
 
         // Agent performs zero or more tool interactions.
         agentService.run(
