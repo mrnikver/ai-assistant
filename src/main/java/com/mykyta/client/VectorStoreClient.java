@@ -129,6 +129,24 @@ public class VectorStoreClient {
         log.info("Qdrant collection created: collection={}", properties.collection());
     }
 
+    /** Deletes the configured collection for a requested startup rebuild; absence is a successful no-op. */
+    public void deleteCollectionIfExists() throws IOException, InterruptedException {
+        log.warn("Qdrant collection deletion requested: collection={}", properties.collection());
+        HttpRequest request = HttpRequest.newBuilder(collectionUri()).DELETE().build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() == 404) {
+            log.info("Qdrant collection deletion skipped because collection is absent: collection={}",
+                    properties.collection());
+            return;
+        }
+        if (response.statusCode() != 200) {
+            log.error("Qdrant collection deletion failed: collection={}, status={}",
+                    properties.collection(), response.statusCode());
+            throw new RuntimeException("Qdrant collection deletion failed: " + response.statusCode());
+        }
+        log.info("Qdrant collection deleted: collection={}", properties.collection());
+    }
+
     /** Stores a project chunk with a stable source-based point id and rich payload metadata. */
     public void upsert(KnowledgeChunk chunk, double[] vector, String indexRunId)
             throws IOException, InterruptedException {

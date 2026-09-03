@@ -22,6 +22,9 @@ qdrant:
   base-url: http://192.168.0.112:6333
   collection: deployment-runbook
 
+rag:
+  reset-on-startup: false
+
 project-knowledge:
   enabled: true
   roots:
