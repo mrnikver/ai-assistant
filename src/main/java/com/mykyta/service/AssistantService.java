@@ -168,16 +168,13 @@ public class AssistantService {
         );
         log.debug("Recent conversation history added: contextMessageCount={}", context.size());
 
-        LLMMessage currentUserMessage =
-                new LLMMessage(
-                        "user",
-                        userMessage
-                );
+        LLMMessage currentUserMessage = new LLMMessage("user", userMessage);
 
         context.add(currentUserMessage);
 
         AgentResult agentResult = agentService.run(context);
         AssistantResponse answer = agentResult.response();
+
         log.debug(
                 "Agent stage completed: iterations={}, toolExecutions={}, contextMessageCount={}",
                 agentResult.iterations(),
@@ -185,18 +182,9 @@ public class AssistantService {
                 context.size()
         );
 
-        conversationService.add(
-                conversationId,
-                currentUserMessage
-        );
+        conversationService.add(conversationId, currentUserMessage);
 
-        conversationService.add(
-                conversationId,
-                new LLMMessage(
-                        "assistant",
-                        answer.answer()
-                )
-        );
+        conversationService.add(conversationId, new LLMMessage("assistant", answer.answer()));
 
         try (TraceScope finalResponse = agentTracer.startSpan(TraceSpanType.FINAL_RESPONSE, "Final response")) {
             finalResponse.metadata("confidence", answer.confidence().name());

@@ -42,10 +42,10 @@ public class AgentService {
     /**
      * Creates the agent orchestrator from its model, capability, and safety boundaries.
      *
-     * @param llmClient Ollama client used for every model decision
-     * @param toolRegistry allow-list and executor for model-requested tools
+     * @param llmClient       Ollama client used for every model decision
+     * @param toolRegistry    allow-list and executor for model-requested tools
      * @param agentProperties iteration safety configuration
-     * @param agentTracer request-local observable event collector
+     * @param agentTracer     request-local observable event collector
      */
     public AgentService(
             LLMClient llmClient,
@@ -69,18 +69,14 @@ public class AgentService {
      * @param context mutable conversation context prepared for this request
      * @return final answer and execution statistics
      * @throws AgentIterationLimitException if every allowed iteration requests another tool
-     * @throws IOException if communication with Ollama fails
-     * @throws InterruptedException if the Ollama request is interrupted
+     * @throws IOException                  if communication with Ollama fails
+     * @throws InterruptedException         if the Ollama request is interrupted
      */
     public AgentResult run(List<LLMMessage> context) throws IOException, InterruptedException {
         List<Map<String, Object>> tools = toolRegistry.definitions();
 
-        log.info(
-                "Agent loop started: maxIterations={}, availableTools={}, contextMessageCount={}",
-                agentProperties.maxIterations(),
-                tools.size(),
-                context.size()
-        );
+        log.info("Agent loop started: maxIterations={}, availableTools={}, contextMessageCount={}",
+                agentProperties.maxIterations(), tools.size(), context.size());
 
         int toolExecutions = 0;
         for (int iteration = 0; iteration < agentProperties.maxIterations(); iteration++) {
@@ -116,41 +112,41 @@ public class AgentService {
                 }
 
                 log.info(
-                    "Agent requested tools: iteration={}, toolCallCount={}, durationMs={}",
-                    iterationNumber,
-                    toolCalls.size(),
-                    elapsedMilliseconds(startedAt)
-            );
+                        "Agent requested tools: iteration={}, toolCallCount={}, durationMs={}",
+                        iterationNumber,
+                        toolCalls.size(),
+                        elapsedMilliseconds(startedAt)
+                );
 
                 context.add(llmResponse);
 
                 for (ToolCall toolCall : toolCalls) {
-                String toolName = toolCall.function() == null ? "unknown" : toolCall.function().name();
-                Map<String, Object> arguments = toolCall.function() == null
-                        || toolCall.function().arguments() == null
-                        ? Map.of()
-                        : toolCall.function().arguments();
-                log.info("Tool execution started: tool={}, argumentNames={}", toolName, arguments.keySet());
-                long toolStartedAt = System.nanoTime();
-                ToolResult toolResult = toolRegistry.execute(toolCall);
-                toolExecutions++;
-                log.info(
-                        "Tool execution completed: tool={}, successful={}, resultLength={}, durationMs={}",
-                        toolName,
-                        toolResult.successful(),
-                        toolResult.content().length(),
-                        elapsedMilliseconds(toolStartedAt)
-                );
+                    String toolName = toolCall.function() == null ? "unknown" : toolCall.function().name();
+                    Map<String, Object> arguments = toolCall.function() == null
+                            || toolCall.function().arguments() == null
+                            ? Map.of()
+                            : toolCall.function().arguments();
+                    log.info("Tool execution started: tool={}, argumentNames={}", toolName, arguments.keySet());
+                    long toolStartedAt = System.nanoTime();
+                    ToolResult toolResult = toolRegistry.execute(toolCall);
+                    toolExecutions++;
+                    log.info(
+                            "Tool execution completed: tool={}, successful={}, resultLength={}, durationMs={}",
+                            toolName,
+                            toolResult.successful(),
+                            toolResult.content().length(),
+                            elapsedMilliseconds(toolStartedAt)
+                    );
 
-                // Feed observations back to the model so it can decide whether
-                // another action is required or it can answer the user.
+                    // Feed observations back to the model so it can decide whether
+                    // another action is required or it can answer the user.
                     context.add(
-                        new LLMMessage(
-                                "tool",
-                                toolResult.asObservation(),
-                                null,
-                                toolName
-                        )
+                            new LLMMessage(
+                                    "tool",
+                                    toolResult.asObservation(),
+                                    null,
+                                    toolName
+                            )
                     );
                 }
             }
