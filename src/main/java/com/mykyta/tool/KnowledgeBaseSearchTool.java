@@ -1,6 +1,7 @@
 package com.mykyta.tool;
 
 import com.mykyta.model.QdrantSearchResult;
+import com.mykyta.model.KnowledgeSourceType;
 import com.mykyta.rag.KnowledgeRetriever;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -11,6 +12,8 @@ import com.mykyta.trace.TraceSpanType;
 
 import java.util.List;
 import java.util.Map;
+import java.util.EnumSet;
+import java.util.Set;
 
 /**
  * Exposes the existing RAG retrieval capability as the {@code search_knowledge_base} agent tool.
@@ -54,6 +57,11 @@ public class KnowledgeBaseSearchTool implements Tool {
                                             "description", "Number of relevant chunks to return (default 3, maximum 10)",
                                             "minimum", 1,
                                             "maximum", MAX_TOP_K
+                                    ),
+                                    "sourceTypes", Map.of(
+                                            "type", "array",
+                                            "description", "Optional evidence categories to search. Use RUNBOOK for procedures; SOURCE_CODE and DOCUMENTATION for implementation questions. MOCK_RUNTIME is unavailable.",
+                                            "items", Map.of("type", "string", "enum", searchableSourceTypeNames())
                                     )
                             ),
                             "required", List.of("query")
@@ -97,20 +105,30 @@ public class KnowledgeBaseSearchTool implements Tool {
     public String execute(Map<String, Object> arguments) {
         String query = requireQuery(arguments.get("query"));
         int topK = resolveTopK(arguments.get("topK"));
-        log.info("Knowledge-base search requested: queryLength={}, topK={}", query.length(), topK);
+        Set<KnowledgeSourceType> sourceTypes = resolveSourceTypes(arguments.get("sourceTypes"));
+        log.info("Knowledge-base search requested: query={}, topK={}, sourceTypes={}",
+                TraceSanitizer.text(query), topK, sourceTypes);
 
         try (TraceScope span = agentTracer.startSpan(TraceSpanType.KNOWLEDGE_SEARCH, "Knowledge-base search")) {
             span.metadata("query", TraceSanitizer.text(query));
             span.metadata("requestedTopK", arguments.getOrDefault("topK", "default"));
             span.metadata("effectiveTopK", topK);
+            span.metadata("sourceTypes", sourceTypes.stream().map(Enum::name).toList());
             try {
-                List<QdrantSearchResult> results = knowledgeRetriever.retrieve(query, topK);
+                List<QdrantSearchResult> results = knowledgeRetriever.retrieve(query, topK, sourceTypes);
                 span.metadata("resultCount", results.size());
+                span.metadata("resultSourceTypes", results.stream()
+                        .map(result -> result.metadata().get("source_type")).filter(value -> value != null)
+                        .map(String::valueOf).distinct().sorted().toList());
+                span.metadata("resultSources", results.stream()
+                        .map(result -> result.metadata().get("source_path")).filter(value -> value != null)
+                        .map(String::valueOf).distinct().limit(MAX_TOP_K).toList());
                 if (results.isEmpty()) {
                     return "No relevant knowledge-base chunks were found.";
                 }
 
-                StringBuilder observation = new StringBuilder("Retrieved knowledge-base chunks:\n");
+                StringBuilder observation = new StringBuilder("Retrieved ").append(results.size())
+                        .append(" knowledge-base chunks:\n");
                 for (int index = 0; index < results.size(); index++) {
                     QdrantSearchResult result = results.get(index);
                     observation.append("\n[")
@@ -135,12 +153,11 @@ public class KnowledgeBaseSearchTool implements Tool {
         if (path == null) {
             return "";
         }
-        StringBuilder source = new StringBuilder(" source=");
+        StringBuilder source = new StringBuilder(" sourceType=")
+                .append(metadata.getOrDefault("source_type", "UNKNOWN"))
+                .append(" project=");
         Object project = metadata.get("project");
-        if (project != null) {
-            source.append(project).append('/');
-        }
-        source.append(path);
+        source.append(project == null ? "unknown" : project).append(" path=").append(path);
         Object startLine = metadata.get("start_line");
         Object endLine = metadata.get("end_line");
         if (startLine != null) {
@@ -151,9 +168,39 @@ public class KnowledgeBaseSearchTool implements Tool {
         }
         Object context = metadata.get("context");
         if (context != null && !context.toString().isBlank()) {
-            source.append(" context=").append(context);
+            source.append(" headingOrSymbol=").append(context);
         }
         return source.toString();
+    }
+
+    private Set<KnowledgeSourceType> resolveSourceTypes(Object value) {
+        EnumSet<KnowledgeSourceType> defaults = EnumSet.allOf(KnowledgeSourceType.class);
+        defaults.remove(KnowledgeSourceType.MOCK_RUNTIME);
+        if (value == null) return defaults;
+        if (!(value instanceof List<?> values) || values.isEmpty()) {
+            throw new InvalidToolArgumentsException("Argument 'sourceTypes' must be a non-empty array");
+        }
+        EnumSet<KnowledgeSourceType> resolved = EnumSet.noneOf(KnowledgeSourceType.class);
+        for (Object item : values) {
+            if (!(item instanceof String name)) {
+                throw new InvalidToolArgumentsException("Every sourceTypes value must be a string");
+            }
+            try {
+                KnowledgeSourceType type = KnowledgeSourceType.valueOf(name);
+                if (!type.knowledgeSearchable()) {
+                    throw new InvalidToolArgumentsException("MOCK_RUNTIME is not available to the Knowledge Agent");
+                }
+                resolved.add(type);
+            } catch (IllegalArgumentException exception) {
+                throw new InvalidToolArgumentsException("Unknown source type: " + name);
+            }
+        }
+        return resolved;
+    }
+
+    private static List<String> searchableSourceTypeNames() {
+        return EnumSet.allOf(KnowledgeSourceType.class).stream().filter(KnowledgeSourceType::knowledgeSearchable)
+                .map(Enum::name).toList();
     }
 
     private String requireQuery(Object value) {

@@ -51,11 +51,21 @@ Only application-controlled `AgentDefinition` and `ToolRegistry` configuration g
 
 The Supervisor classifies the evidence domains implied by the request. Documentation, architecture, source, and runbook questions go to Knowledge. Current health, deployment status, and operational logs go to Runtime. Combined questions can delegate to both before a final synthesis. Delegations are explicit tool calls, bounded by `agent.supervisor-max-iterations`, and visible in the execution trace.
 
-## Knowledge Agent and RAG
+## Knowledge Agent and source-aware RAG
 
-At startup, `RunbookIndexer` indexes the bundled deployment runbook and `ProjectKnowledgeIndexer` scans configured backend and UI roots. Java, Markdown, TypeScript, and TSX content is chunked with source metadata, embedded, and upserted into Qdrant with stable IDs.
+The knowledge model separates three evidence concepts:
 
-`search_knowledge_base(query, topK?)` remains a retrieval-only capability. It embeds the focused query, searches Qdrant, and returns ranked chunks as an observation. `topK` defaults to 3 and is limited to 1–10. Retrieval is never available to the Runtime Agent and never runs automatically outside a Knowledge Agent decision.
+- **Project knowledge** explains what the system is: production source code, architecture documentation, tests, and sanitized configuration.
+- **Operational knowledge** explains what responders should do: runbooks and troubleshooting procedures.
+- **Runtime state** explains what is happening now and comes only from Runtime Agent tools, never from RAG.
+
+At startup, `RunbookIndexer` indexes the bundled operational corpus under `knowledge/runbooks/` plus the legacy deployment runbook. `ProjectKnowledgeIndexer` scans configured backend and UI roots. Files are classified deterministically as `SOURCE_CODE`, `DOCUMENTATION`, `RUNBOOK`, `CONFIGURATION`, `TEST`, or `MOCK_RUNTIME` from their paths, names, and extensions. Existing project, repository-relative path, language, heading/symbol context, and line metadata remain in each payload. Configuration secret values are redacted before embedding or storage.
+
+Both indexers retain stable source-based IDs and use the same Qdrant collection. Successful re-indexing removes stale points from the relevant index scope, including legacy project points and old unclassified runbook points, so prior payloads cannot bypass the new filters.
+
+`search_knowledge_base(query, topK?, sourceTypes?)` remains retrieval-only. It embeds the focused query and applies a Qdrant payload filter before similarity results are returned. `topK` defaults to 3 and is limited to 1–10. `sourceTypes` is optional and defaults to every knowledge category except `MOCK_RUNTIME`; callers can select `RUNBOOK` for procedures or `SOURCE_CODE`/`DOCUMENTATION` for implementation questions. `MOCK_RUNTIME` is rejected even when explicitly requested, so hardcoded mock state such as `MockDeploymentService` cannot become Knowledge Agent evidence. Results include source type, path, heading or symbol, line range, and relevance score.
+
+Retrieval is never available to the Runtime Agent and never runs automatically outside a Knowledge Agent decision. The Knowledge Agent is instructed to distinguish implementation facts, recommended procedures, and unverified assumptions, and never present source constants, examples, tests, or mocks as current observations.
 
 ## Runtime Agent and restored mocked tools
 
@@ -151,5 +161,5 @@ The React UI includes two related views. “View execution” renders the generi
 - Runtime results are deterministic mocks, not live service health.
 - Persistent memory is application-wide rather than user-scoped.
 - Conversation history and traces are in memory and disappear on restart; traces may also be evicted.
-- RAG has no minimum similarity threshold, and large retrievals consume model context.
+- RAG has no minimum similarity threshold, and large retrievals consume model context. Source filters constrain evidence category but do not replace relevance evaluation.
 - Specialist execution is sequential when a Supervisor response requests both delegations.
