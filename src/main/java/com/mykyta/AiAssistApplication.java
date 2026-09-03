@@ -6,9 +6,9 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 @SpringBootApplication
 @ConfigurationPropertiesScan
-public class Assistant {
+public class AiAssistApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(Assistant.class, args);
+        SpringApplication.run(AiAssistApplication.class, args);
     }
 }

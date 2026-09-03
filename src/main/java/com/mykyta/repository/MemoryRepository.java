@@ -1,5 +1,6 @@
-package com.mykyta.memory;
+package com.mykyta.repository;
 
+import com.mykyta.entity.Memory;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;

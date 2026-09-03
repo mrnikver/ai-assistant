@@ -2,11 +2,11 @@ package com.mykyta.service;
 
 import com.mykyta.client.LLMClient;
 import com.mykyta.config.AssistantProperties;
-import com.mykyta.memory.Memory;
-import com.mykyta.model.AssistantResponse;
+import com.mykyta.entity.Memory;
 import com.mykyta.model.LLMMessage;
-import com.mykyta.model.MemoryExtractionResponse;
 import com.mykyta.rag.KnowledgeRetriever;
+import com.mykyta.response.AssistantResponse;
+import com.mykyta.response.MemoryExtractionResponse;
 import com.mykyta.tool.ToolDispatcher;
 import com.mykyta.util.JsonResourceLoader;
 import org.springframework.stereotype.Service;

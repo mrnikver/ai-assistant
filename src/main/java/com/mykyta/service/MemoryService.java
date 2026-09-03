@@ -1,8 +1,8 @@
 package com.mykyta.service;
 
-import com.mykyta.memory.Memory;
-import com.mykyta.memory.MemoryRepository;
+import com.mykyta.entity.Memory;
 import com.mykyta.model.MemoryKey;
+import com.mykyta.repository.MemoryRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -16,10 +16,7 @@ public class MemoryService {
         this.memoryRepository = memoryRepository;
     }
 
-    public void save(
-            MemoryKey key,
-            String value
-    ) {
+    public void save(MemoryKey key, String value) {
         String dbKey = key.name();
 
         Memory memory = memoryRepository.findByKey(dbKey)
