@@ -3,10 +3,12 @@ package com.mykyta.rag;
 import com.mykyta.client.EmbeddingClient;
 import com.mykyta.client.VectorStoreClient;
 import com.mykyta.model.QdrantSearchResult;
+import com.mykyta.model.KnowledgeSourceType;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * Implements semantic knowledge retrieval using the existing embedding and Qdrant clients.
@@ -31,10 +33,10 @@ public class RunbookRetriever implements KnowledgeRetriever {
     }
 
     @Override
-    public List<QdrantSearchResult> retrieve(String query, int limit) {
+    public List<QdrantSearchResult> retrieve(String query, int limit, Set<KnowledgeSourceType> sourceTypes) {
 
         long startedAt = System.nanoTime();
-        log.debug("Runbook retrieval started: queryLength={}", query.length());
+        log.debug("Knowledge retrieval started: queryLength={}, sourceTypes={}", query.length(), sourceTypes);
 
         try {
             double[] queryEmbedding =
@@ -43,20 +45,23 @@ public class RunbookRetriever implements KnowledgeRetriever {
             List<QdrantSearchResult> results =
                     vectorStoreClient.search(
                             queryEmbedding,
-                            limit
+                            limit,
+                            sourceTypes
                     );
 
             if (results.isEmpty()) {
                 log.info(
-                        "Runbook retrieval completed without a match: durationMs={}",
+                        "Knowledge retrieval completed without a match: sourceTypes={}, durationMs={}",
+                        sourceTypes,
                         (System.nanoTime() - startedAt) / 1_000_000
                 );
                 return List.of();
             }
 
             log.info(
-                    "Runbook retrieval completed: resultCount={}, durationMs={}",
+                    "Knowledge retrieval completed: resultCount={}, sourceTypes={}, durationMs={}",
                     results.size(),
+                    sourceTypes,
                     (System.nanoTime() - startedAt) / 1_000_000
             );
 
@@ -64,7 +69,8 @@ public class RunbookRetriever implements KnowledgeRetriever {
 
         } catch (Exception e) {
             log.error(
-                    "Runbook retrieval failed: durationMs={}",
+                    "Knowledge retrieval failed: sourceTypes={}, durationMs={}",
+                    sourceTypes,
                     (System.nanoTime() - startedAt) / 1_000_000,
                     e
             );

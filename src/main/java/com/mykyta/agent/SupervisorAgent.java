@@ -21,6 +21,8 @@ public class SupervisorAgent {
             Delegate documentation, source, architecture, and runbook questions to ask_knowledge_agent.
             Delegate current service health, deployment state, and operational questions to ask_runtime_agent.
             Delegate to both when the request needs runtime evidence and documented guidance, then synthesize their observations.
+            In combined answers clearly separate verified runtime evidence, documentation/runbook guidance,
+            likely interpretation, and anything not verified. Never present documentation as current runtime fact.
             Do not invent specialist results. Keep the final answer concise and technical.
             Return JSON with exactly "answer" and "confidence" (LOW, MEDIUM, or HIGH).
             """;

@@ -17,7 +17,7 @@ import java.util.regex.Pattern;
 /** Produces the single structured input/output summary consumed by logs and traces. */
 @Component
 public class LlmObservabilitySummarizer {
-    private static final Pattern SOURCE = Pattern.compile("source=([^\\s]+)");
+    private static final Pattern SOURCE = Pattern.compile("path=([^\\s]+)");
     private static final Pattern RESULT = Pattern.compile("(?m)^\\[\\d+]");
     private final LlmObservabilitySanitizer sanitizer;
     private final ObjectMapper objectMapper;
