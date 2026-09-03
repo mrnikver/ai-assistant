@@ -1,7 +1,9 @@
 package com.mykyta.client;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mykyta.model.Confidence;
 import com.mykyta.model.LLMMessage;
 import com.mykyta.model.OllamaChatRequest;
 import com.mykyta.response.AssistantResponse;
@@ -15,6 +17,13 @@ import java.net.http.HttpResponse;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Translates application-level chat operations into Ollama HTTP requests.
+ *
+ * <p>The client owns transport and response deserialization only. Agent-loop
+ * decisions and Java tool execution remain in application services so model
+ * output never gains direct access to executable code.</p>
+ */
 @Slf4j
 public class LLMClient {
 
@@ -24,6 +33,14 @@ public class LLMClient {
     private final String model;
     private final Map<String, Object> structuredOutputSchema;
 
+    /**
+     * Creates an Ollama client using one configured model and final-answer schema.
+     *
+     * @param baseUrl Ollama server base URL
+     * @param model model name used for inference
+     * @param objectMapper JSON serializer
+     * @param structuredOutputSchema JSON schema required for final assistant answers
+     */
     public LLMClient(
             String baseUrl,
             String model,
@@ -37,6 +54,14 @@ public class LLMClient {
         this.structuredOutputSchema = structuredOutputSchema;
     }
 
+    /**
+     * Requests a structured answer without exposing tools.
+     *
+     * @param messages complete conversation context
+     * @return parsed structured assistant response
+     * @throws IOException if request serialization, transport, or parsing fails
+     * @throws InterruptedException if the HTTP operation is interrupted
+     */
     public AssistantResponse chat(
             List<LLMMessage> messages
     ) throws IOException, InterruptedException {
@@ -48,6 +73,17 @@ public class LLMClient {
         );
     }
 
+    /**
+     * Invokes Ollama with a caller-supplied structured-output schema.
+     *
+     * @param messages complete conversation context
+     * @param schema JSON schema Ollama should enforce
+     * @param responseType Java response type
+     * @param <T> structured response type
+     * @return parsed response content
+     * @throws IOException if request serialization, transport, or parsing fails
+     * @throws InterruptedException if the HTTP operation is interrupted
+     */
     public <T> T structuredChat(
             List<LLMMessage> messages,
             Map<String, Object> schema,
@@ -83,6 +119,20 @@ public class LLMClient {
         );
     }
 
+    /**
+     * Requests one agent decision with the registry's available tools.
+     *
+     * <p>The response either contains tool calls or final content. Tool-enabled
+     * requests intentionally omit Ollama's {@code format} option because some
+     * model/runtime combinations prioritize structured output and stop emitting
+     * tool calls when both features are requested together.</p>
+     *
+     * @param messages current agent conversation including prior observations
+     * @param tools registered tool definitions in Ollama format
+     * @return assistant message containing requested actions or final JSON content
+     * @throws IOException if request serialization, transport, or parsing fails
+     * @throws InterruptedException if the HTTP operation is interrupted
+     */
     public LLMMessage chatWithTools(
             List<LLMMessage> messages,
             List<Map<String, Object>> tools
@@ -110,6 +160,29 @@ public class LLMClient {
                 response.path("message"),
                 LLMMessage.class
         );
+    }
+
+    /**
+     * Parses the final content from a tool-enabled turn into the public response model.
+     *
+     * <p>The system prompt asks for the normal JSON response shape. If a local
+     * model returns plain text instead, the text is preserved as the answer with
+     * medium confidence so a formatting imperfection does not fail the request.</p>
+     *
+     * @param message assistant message that contains no tool calls
+     * @return structured final answer, including a safe plain-text fallback
+     * @throws IOException if the model content is absent
+     */
+    public AssistantResponse parseAssistantResponse(LLMMessage message) throws IOException {
+        if (message == null || message.content() == null || message.content().isBlank()) {
+            throw new IOException("LLM returned neither tool calls nor final answer content");
+        }
+        try {
+            return objectMapper.readValue(message.content(), AssistantResponse.class);
+        } catch (JsonProcessingException exception) {
+            log.warn("LLM final answer did not match the structured response schema; using plain-text fallback");
+            return new AssistantResponse(message.content(), Confidence.MEDIUM);
+        }
     }
 
     private JsonNode send(

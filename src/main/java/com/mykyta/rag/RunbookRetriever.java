@@ -8,6 +8,13 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 
+/**
+ * Implements semantic knowledge retrieval using the existing embedding and Qdrant clients.
+ *
+ * <p>The retriever deliberately knows nothing about agent decisions or final
+ * answer generation. It embeds the supplied query and returns the requested
+ * number of vector-search matches.</p>
+ */
 @Component
 @Slf4j
 public class RunbookRetriever implements KnowledgeRetriever {
@@ -24,7 +31,7 @@ public class RunbookRetriever implements KnowledgeRetriever {
     }
 
     @Override
-    public String retrieve(String query) {
+    public List<QdrantSearchResult> retrieve(String query, int limit) {
 
         long startedAt = System.nanoTime();
         log.debug("Runbook retrieval started: queryLength={}", query.length());
@@ -36,7 +43,7 @@ public class RunbookRetriever implements KnowledgeRetriever {
             List<QdrantSearchResult> results =
                     vectorStoreClient.search(
                             queryEmbedding,
-                            1
+                            limit
                     );
 
             if (results.isEmpty()) {
@@ -44,18 +51,16 @@ public class RunbookRetriever implements KnowledgeRetriever {
                         "Runbook retrieval completed without a match: durationMs={}",
                         (System.nanoTime() - startedAt) / 1_000_000
                 );
-                return "";
+                return List.of();
             }
 
-            QdrantSearchResult result = results.get(0);
             log.info(
-                    "Runbook retrieval completed: score={}, resultLength={}, durationMs={}",
-                    result.score(),
-                    result.text().length(),
+                    "Runbook retrieval completed: resultCount={}, durationMs={}",
+                    results.size(),
                     (System.nanoTime() - startedAt) / 1_000_000
             );
 
-            return result.text();
+            return results;
 
         } catch (Exception e) {
             log.error(

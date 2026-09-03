@@ -9,10 +9,22 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.time.Instant;
 
+/**
+ * Converts expected request and agent failures into stable HTTP error responses.
+ *
+ * <p>Operational details remain in server logs while clients receive concise,
+ * non-sensitive messages.</p>
+ */
 @RestControllerAdvice
 @Slf4j
 public class GlobalExceptionHandler {
 
+    /**
+     * Reports the first bean-validation error in a client-readable form.
+     *
+     * @param exception validation failure raised while binding the request
+     * @return HTTP 400 response with a stable application error code
+     */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApplicationException> handleValidation(
             MethodArgumentNotValidException exception
@@ -35,6 +47,12 @@ public class GlobalExceptionHandler {
                 ));
     }
 
+    /**
+     * Reports syntactically invalid request JSON without exposing parser internals.
+     *
+     * @param exception JSON conversion failure
+     * @return HTTP 400 response with a stable application error code
+     */
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApplicationException> handleMalformedJson(
             HttpMessageNotReadableException exception
@@ -44,6 +62,25 @@ public class GlobalExceptionHandler {
                 .body(new ApplicationException(
                         "MALFORMED_JSON",
                         "Request body contains invalid JSON",
+                        Instant.now()
+                ));
+    }
+
+    /**
+     * Reports termination when the model never produces an answer within the loop limit.
+     *
+     * @param exception bounded-loop termination signal
+     * @return HTTP 500 response identifying agent exhaustion
+     */
+    @ExceptionHandler(AgentIterationLimitException.class)
+    public ResponseEntity<ApplicationException> handleAgentIterationLimit(
+            AgentIterationLimitException exception
+    ) {
+        log.error("Agent iteration limit reached", exception);
+        return ResponseEntity.internalServerError()
+                .body(new ApplicationException(
+                        "AGENT_ITERATION_LIMIT",
+                        "The assistant could not complete the request within its reasoning limit",
                         Instant.now()
                 ));
     }
