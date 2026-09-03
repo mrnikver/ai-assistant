@@ -35,6 +35,57 @@ public class VectorStoreClient {
         this.properties = properties;
     }
 
+    public void ensureCollection(int vectorSize) throws IOException, InterruptedException {
+        URI collectionUri = collectionUri();
+        HttpRequest getRequest = HttpRequest.newBuilder(collectionUri)
+                .GET()
+                .build();
+
+        HttpResponse<String> getResponse = httpClient.send(
+                getRequest,
+                HttpResponse.BodyHandlers.ofString()
+        );
+
+        if (getResponse.statusCode() == 200) {
+            return;
+        }
+
+        if (getResponse.statusCode() != 404) {
+            throw new RuntimeException(
+                    "Qdrant collection lookup failed: "
+                            + getResponse.statusCode()
+                            + " "
+                            + getResponse.body()
+            );
+        }
+
+        Map<String, Object> body = Map.of(
+                "vectors", Map.of(
+                        "size", vectorSize,
+                        "distance", "Cosine"
+                )
+        );
+
+        HttpRequest createRequest = HttpRequest.newBuilder(collectionUri)
+                .header("Content-Type", "application/json")
+                .PUT(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
+                .build();
+
+        HttpResponse<String> createResponse = httpClient.send(
+                createRequest,
+                HttpResponse.BodyHandlers.ofString()
+        );
+
+        if (createResponse.statusCode() != 200) {
+            throw new RuntimeException(
+                    "Qdrant collection creation failed: "
+                            + createResponse.statusCode()
+                            + " "
+                            + createResponse.body()
+            );
+        }
+    }
+
     public void upsert(
             String text,
             double[] vector
@@ -154,5 +205,13 @@ public class VectorStoreClient {
         }
 
         return results;
+    }
+
+    private URI collectionUri() {
+        return URI.create(
+                properties.baseUrl()
+                        + "/collections/"
+                        + properties.collection()
+        );
     }
 }
