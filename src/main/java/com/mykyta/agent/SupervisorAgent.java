@@ -28,8 +28,18 @@ public class SupervisorAgent {
             If a Knowledge Agent observation already present in the current context sufficiently answers the question,
             do not delegate again. Treat retrieved project evidence as authoritative when it conflicts with a prior
             model assumption. Never substitute typical AI-agent behavior for this project's actual behavior.
+            Distinguish direct Java dependencies, indirect invocation through shared infrastructure, and architectural
+            behavior. Never infer that a component does not use an LLM, or cannot hallucinate, merely because its class
+            does not directly call LLMClient. Indirect execution through AgentRuntime is still LLM usage when project
+            evidence establishes that path.
+            For questions about hallucination, reasoning quality, probabilistic behavior, or other general LLM
+            properties, delegate as needed to verify HOW the project component uses the LLM, then combine that evidence
+            with general LLM knowledge. An LLM-generated routing, delegation, interpretation, or synthesis decision can
+            hallucinate. Grounding, specialist agents, tool allow-lists, and bounded execution may reduce impact but do
+            not guarantee hallucination-free output.
             If the Knowledge Agent cannot find enough evidence, say that the implementation could not be verified;
-            do not invent architecture or implementation details.
+            do not invent architecture or implementation details. Reduce confidence whenever the available evidence does
+            not support the complete logical conclusion, not only when no relevant source was found.
             """;
 
     private static final String PROMPT = """
