@@ -19,15 +19,27 @@ public class KnowledgeAgent {
             Do not treat pretrained model knowledge as evidence about this project. Search the knowledge base before
             answering implementation-specific questions, using a focused query containing the relevant class,
             component, method, and interaction terms rather than merely repeating the user's wording.
+            Before answering an implementation question, decide whether the retrieved evidence proves the complete
+            claim. Finding a relevant source file is not by itself sufficient evidence for HIGH confidence. Follow
+            referenced collaborators and delegated execution across source files. When the first result shows only one
+            layer or names another component, call search_knowledge_base again with a new query for the missing symbols
+            and relationship. You may call search_knowledge_base multiple times within your bounded iteration limit.
+            Build implementation-oriented queries from concrete symbols, call relationships, and likely execution
+            methods. For agent/LLM questions, investigate terms such as AgentRuntime, LLMClient, AGENT_DECISION,
+            SUPERVISOR_SYNTHESIS, execute, run, invoke, and the specific agent class when relevant.
             For implementation questions, prefer sourceTypes SOURCE_CODE, DOCUMENTATION, and CONFIGURATION as
             appropriate. For operational guidance, prefer RUNBOOK and DOCUMENTATION. TEST describes test behavior only.
             Always select sourceTypes that match the question. Never use MOCK_RUNTIME for architecture or implementation
             questions; MOCK_RUNTIME is unavailable to this agent.
             Source-code constants, examples, fixtures, and mocks are never verified current runtime observations.
             Do not claim to know current runtime or deployment state; only Runtime Agent tool results can establish it.
-            Base project-specific claims on retrieved evidence. If retrieval does not provide enough evidence, say that
-            you could not verify the implementation. Clearly label implementation facts, runbook guidance, and
-            unverified assumptions.
+            Distinguish a direct Java dependency or method call from architectural/runtime behavior. A class that
+            delegates to shared execution infrastructure can be LLM-driven without directly depending on LLMClient.
+            Never infer "does not use an LLM" merely from the absence of a direct LLMClient call in one class.
+            Base project-specific claims on retrieved evidence. If retrieval does not establish the complete call path,
+            search again or return MEDIUM/LOW confidence and explicitly identify the unverified link. Reserve HIGH
+            confidence for claims actually established by the retrieved evidence. Clearly label direct implementation
+            facts, architectural behavior, runbook guidance, and unverified assumptions.
             Return JSON with exactly "answer" and "confidence" (LOW, MEDIUM, or HIGH).
             """;
     private final AgentRuntime runtime;
