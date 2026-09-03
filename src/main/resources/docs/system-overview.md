@@ -63,6 +63,8 @@ At startup, `RunbookIndexer` indexes the bundled operational corpus under `knowl
 
 Both indexers retain stable source-based IDs and use the same Qdrant collection. Successful re-indexing removes stale points from the relevant index scope, including legacy project points and old unclassified runbook points, so prior payloads cannot bypass the new filters.
 
+Startup collection handling is controlled by `rag.reset-on-startup`. The default is `false`, which preserves the existing idempotent incremental behavior: the collection is reused, stable points are updated, and stale indexed points are removed. The `local` and `dev` Spring profiles default the flag to `true`. In those profiles startup deletes the configured collection when present; a missing collection is a safe no-op. The runbook indexer then recreates the collection with the current embedding dimension before its first upsert, followed by the normal full runbook and project-knowledge indexing lifecycle. This option is destructive to the knowledge collection and is intended only for local development.
+
 `search_knowledge_base(query, topK?, sourceTypes?)` remains retrieval-only. It embeds the focused query and applies a Qdrant payload filter before similarity results are returned. `topK` defaults to 3 and is limited to 1–10. `sourceTypes` is optional and defaults to every knowledge category except `MOCK_RUNTIME`; callers can select `RUNBOOK` for procedures or `SOURCE_CODE`/`DOCUMENTATION` for implementation questions. `MOCK_RUNTIME` is rejected even when explicitly requested, so hardcoded mock state such as `MockDeploymentService` cannot become Knowledge Agent evidence. Results include source type, path, heading or symbol, line range, and relevance score.
 
 Retrieval is never available to the Runtime Agent and never runs automatically outside a Knowledge Agent decision. The Knowledge Agent is instructed to distinguish implementation facts, recommended procedures, and unverified assumptions, and never present source constants, examples, tests, or mocks as current observations.
@@ -149,6 +151,7 @@ The React UI includes two related views. “View execution” renders the generi
 | `agent.runtime-max-iterations` | Maximum Runtime Agent decisions (default 3) |
 | `assistant.history-limit` | Recent conversation messages supplied to the Supervisor |
 | `embedding.*`, `qdrant.*` | RAG embedding and vector-search configuration |
+| `rag.reset-on-startup` | Delete and fully rebuild the Qdrant knowledge collection at startup; false by default, true in `local`/`dev` profiles |
 | `project-knowledge.*` | Project indexing roots and chunk size |
 | `spring.datasource.*` | PostgreSQL persistent-memory connection |
 | `trace.max-entries` | Maximum retained in-memory traces |

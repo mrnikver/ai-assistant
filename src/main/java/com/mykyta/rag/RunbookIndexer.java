@@ -42,6 +42,7 @@ public class RunbookIndexer implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) throws Exception {
         long startedAt = System.nanoTime();
+        log.info("Operational runbook indexing started: documentCount={}", RESOURCES.size());
         String indexRunId = UUID.randomUUID().toString();
         List<KnowledgeChunk> chunks = new ArrayList<>();
         for (String resourcePath : RESOURCES) {
@@ -61,6 +62,7 @@ public class RunbookIndexer implements ApplicationRunner {
             double[] embedding = embeddingClient.embed("Source type: RUNBOOK\nPath: " + chunk.sourcePath()
                     + "\nHeading: " + chunk.context() + "\n\n" + chunk.text());
             if (!collectionInitialized) {
+                log.info("Preparing Qdrant collection before runbook upsert");
                 vectorStoreClient.ensureCollection(embedding.length);
                 collectionInitialized = true;
             }

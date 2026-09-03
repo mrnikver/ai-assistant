@@ -61,6 +61,7 @@ public class ProjectKnowledgeIndexer implements ApplicationRunner {
         }
 
         long startedAt = System.nanoTime();
+        log.info("Project knowledge indexing started: configuredRootCount={}", properties.roots().size());
         List<KnowledgeChunk> chunks = new ArrayList<>();
         int fileCount = 0;
         for (String configuredRoot : properties.roots()) {
