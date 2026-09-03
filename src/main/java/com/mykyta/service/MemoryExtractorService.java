@@ -2,7 +2,7 @@ package com.mykyta.service;
 
 import com.mykyta.client.LLMClient;
 import com.mykyta.model.LLMMessage;
-import com.mykyta.model.MemoryExtractionResponse;
+import com.mykyta.response.MemoryExtractionResponse;
 import com.mykyta.util.JsonResourceLoader;
 import org.springframework.stereotype.Service;
 

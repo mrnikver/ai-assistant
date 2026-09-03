@@ -11,14 +11,12 @@ import java.util.Map;
 
 @Configuration
 public class LLMConfig {
+
     @Bean
     public LLMClient llmClient(LLMProperties properties,
                                ObjectMapper objectMapper,
                                JsonResourceLoader jsonResourceLoader) throws IOException {
-        Map<String, Object> schema =
-                jsonResourceLoader.load(
-                        "schemas/assistant-response.json"
-                );
+        Map<String, Object> schema = jsonResourceLoader.load("schemas/assistant-response.json");
 
         return new LLMClient(
                 properties.baseUrl(),

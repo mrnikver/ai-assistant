@@ -2,9 +2,9 @@ package com.mykyta.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.mykyta.model.OllamaChatRequest;
-import com.mykyta.model.AssistantResponse;
 import com.mykyta.model.LLMMessage;
+import com.mykyta.model.OllamaChatRequest;
+import com.mykyta.response.AssistantResponse;
 
 import java.io.IOException;
 import java.net.URI;

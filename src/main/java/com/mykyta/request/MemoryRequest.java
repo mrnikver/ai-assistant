@@ -1,4 +1,6 @@
-package com.mykyta.model;
+package com.mykyta.request;
+
+import com.mykyta.model.MemoryKey;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;

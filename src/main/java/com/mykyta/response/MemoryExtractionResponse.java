@@ -1,4 +1,6 @@
-package com.mykyta.model;
+package com.mykyta.response;
+
+import com.mykyta.model.MemoryKey;
 
 public record MemoryExtractionResponse(
         boolean shouldStore,

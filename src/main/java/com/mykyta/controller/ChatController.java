@@ -1,9 +1,8 @@
 package com.mykyta.controller;
 
-import com.mykyta.client.EmbeddingClient;
-import com.mykyta.model.ChatRequest;
-import com.mykyta.model.ChatResponse;
-import com.mykyta.model.AssistantResponse;
+import com.mykyta.request.ChatRequest;
+import com.mykyta.response.AssistantResponse;
+import com.mykyta.response.ChatResponse;
 import com.mykyta.service.AssistantService;
 import jakarta.validation.Valid;
 import org.springframework.util.StringUtils;
@@ -18,11 +17,8 @@ public class ChatController {
 
     private final AssistantService assistantService;
 
-    private final EmbeddingClient embeddingClient;
-
-    public ChatController(AssistantService assistantService, EmbeddingClient embeddingClient) {
+    public ChatController(AssistantService assistantService) {
         this.assistantService = assistantService;
-        this.embeddingClient = embeddingClient;
     }
 
     @PostMapping("/chat")
@@ -32,16 +28,6 @@ public class ChatController {
         AssistantResponse response = assistantService.chat(
                 conversationId,
                 request.message()
-        );
-
-        double[] embedding =
-                embeddingClient.embed(
-                        "Database connection refused"
-                );
-
-        System.out.println(
-                "Embedding dimensions: "
-                        + embedding.length
         );
 
         return new ChatResponse(
