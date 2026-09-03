@@ -5,6 +5,7 @@ import com.mykyta.model.MemoryKey;
 import com.mykyta.repository.MemoryRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import com.mykyta.trace.AgentTracer;
 import com.mykyta.trace.TraceScope;
 import com.mykyta.trace.TraceSpanType;
@@ -63,6 +64,27 @@ public class MemoryService {
                 return memories;
             } catch (RuntimeException exception) {
                 span.fail(exception);
+                throw exception;
+            }
+        }
+    }
+
+    /**
+     * Deletes every persistent memory row in one transaction.
+     * @return number of rows present and deleted by this reset
+     */
+    @Transactional
+    public long deleteAll() {
+        try (TraceScope span = agentTracer.startSpan(TraceSpanType.MEMORY_RESET, "Reset persistent memory")) {
+            try {
+                long deletedCount = memoryRepository.count();
+                memoryRepository.deleteAllInBatch();
+                span.metadata("deletedCount", deletedCount);
+                log.info("Persistent memory rows deleted: count={}", deletedCount);
+                return deletedCount;
+            } catch (RuntimeException exception) {
+                span.fail(exception);
+                log.error("Persistent memory row deletion failed", exception);
                 throw exception;
             }
         }

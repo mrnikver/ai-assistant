@@ -2,10 +2,12 @@ package com.mykyta.controller;
 
 import com.mykyta.entity.Memory;
 import com.mykyta.request.MemoryRequest;
+import com.mykyta.response.MemoryResetResponse;
 import com.mykyta.service.MemoryService;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -35,5 +37,19 @@ public class MemoryController {
         List<Memory> memories = memoryService.getAll();
         log.info("Memory list returned: count={}", memories.size());
         return memories;
+    }
+
+    /** Deletes persistent PostgreSQL memory only; conversation and knowledge stores are unaffected. */
+    @DeleteMapping
+    public MemoryResetResponse reset() {
+        log.info("Persistent memory reset request received");
+        try {
+            long deletedCount = memoryService.deleteAll();
+            log.info("Persistent memory reset succeeded: deletedCount={}", deletedCount);
+            return new MemoryResetResponse(deletedCount);
+        } catch (RuntimeException exception) {
+            log.error("Persistent memory reset failed", exception);
+            throw exception;
+        }
     }
 }

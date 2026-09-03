@@ -12,5 +12,6 @@ public enum TraceSpanType {
     /** Query vector generation. */ EMBEDDING,
     /** Qdrant similarity query. */ VECTOR_SEARCH,
     /** Persistent-memory read. */ MEMORY_LOOKUP,
+    /** Destructive persistent-memory reset. */ MEMORY_RESET,
     /** Final answer publication stage. */ FINAL_RESPONSE
 }
