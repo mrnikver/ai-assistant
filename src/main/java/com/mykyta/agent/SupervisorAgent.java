@@ -15,10 +15,28 @@ import java.util.Map;
 /** Owns user-facing reasoning and delegates investigation to isolated specialist agents. */
 @Service
 public class SupervisorAgent {
+    /** Policy boundary that keeps claims about this application grounded in indexed project evidence. */
+    private static final String PROJECT_KNOWLEDGE_REQUIRED = """
+            PROJECT_KNOWLEDGE_REQUIRED:
+            You do not have authoritative knowledge about this application's implementation from pretrained knowledge.
+            Before making factual claims about this specific application's architecture, agents, Supervisor or Runtime
+            behavior, tool orchestration, ToolRegistry, RAG, memory, tracing, LLM calls, configuration, backend,
+            frontend, or source code, delegate a focused investigation to ask_knowledge_agent.
+            You may answer generic conceptual questions directly. For example, "What is RAG?" is generic, while
+            "How is RAG implemented in this project?" requires project knowledge. Likewise, "What is a supervisor
+            agent?" is generic, while "Does our SupervisorAgent call the LLM?" requires project knowledge.
+            If a Knowledge Agent observation already present in the current context sufficiently answers the question,
+            do not delegate again. Treat retrieved project evidence as authoritative when it conflicts with a prior
+            model assumption. Never substitute typical AI-agent behavior for this project's actual behavior.
+            If the Knowledge Agent cannot find enough evidence, say that the implementation could not be verified;
+            do not invent architecture or implementation details.
+            """;
+
     private static final String PROMPT = """
             You are the Supervisor Agent for a deployment investigation assistant.
             You own the final user answer but cannot execute domain-specific tools directly.
-            Delegate documentation, source, architecture, and runbook questions to ask_knowledge_agent.
+            """ + PROJECT_KNOWLEDGE_REQUIRED + """
+            Delegate documentation and runbook questions to ask_knowledge_agent.
             Delegate current service health, deployment state, and operational questions to ask_runtime_agent.
             Delegate to both when the request needs runtime evidence and documented guidance, then synthesize their observations.
             In combined answers clearly separate verified runtime evidence, documentation/runbook guidance,
@@ -36,7 +54,10 @@ public class SupervisorAgent {
         this.definition = new AgentDefinition("Supervisor Agent", AgentType.SUPERVISOR, PROMPT,
                 List.of(
                         new DelegationTool("ask_knowledge_agent",
-                                "Ask the documentation and project-knowledge specialist to investigate a focused question.",
+                                "Delegate questions requiring authoritative knowledge about this application, including "
+                                        + "its architecture, implementation, source code, configuration, design decisions, "
+                                        + "RAG, agents, tools, memory, tracing, runbooks, and documentation. Use this before "
+                                        + "making project-specific factual claims.",
                                 knowledgeAgent::investigate),
                         new DelegationTool("ask_runtime_agent",
                                 "Ask the runtime specialist to investigate current mocked deployment state or logs.",

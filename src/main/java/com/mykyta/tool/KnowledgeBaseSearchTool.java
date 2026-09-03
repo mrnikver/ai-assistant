@@ -41,10 +41,11 @@ public class KnowledgeBaseSearchTool implements Tool {
             "type", "function",
             "function", Map.of(
                     "name", NAME,
-                    "description", "Search the internal knowledge base for information relevant to the user's question. "
-                            + "Use this tool when the answer may depend on internal documentation, runbooks, deployment "
-                            + "instructions, troubleshooting procedures, architecture documentation, or other project-specific "
-                            + "knowledge. Do not call it for general knowledge when retrieval is unnecessary.",
+                    "description", "Search authoritative evidence about this application, including project architecture, "
+                            + "source code, implementation details, configuration, design decisions, RAG, agents, tools, "
+                            + "memory, tracing, runbooks, and documentation. Use it before answering project-specific "
+                            + "implementation questions; it is not only a generic documentation search. Do not call it "
+                            + "for general knowledge when retrieval is unnecessary.",
                     "parameters", Map.of(
                             "type", "object",
                             "properties", Map.of(
