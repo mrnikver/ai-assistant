@@ -29,7 +29,9 @@ User request
     |
     +--> Store the user message and final answer in conversation history
     |
-    +--> Return the answer, confidence, and conversation ID
+    +--> Complete and retain the execution trace
+    |
+    +--> Return the answer, confidence, conversation ID, message ID, and trace summary
 ```
 
 ## Context assembly
@@ -134,6 +136,7 @@ Every additional tool-loop iteration adds another call. Embedding and Qdrant req
 | `qdrant.collection` | Collection containing runbook vectors |
 | `assistant.history-limit` | Maximum recent conversation messages added to context |
 | `agent.max-iterations` | Maximum LLM decision/tool iterations per request; defaults to 5 and must be at least 1 |
+| `trace.max-entries` | Maximum completed traces kept in the local bounded store; defaults to 500 and evicts oldest first |
 | `spring.datasource.*` | PostgreSQL connection settings |
 
 ## Ollama and qwen3 limitations
@@ -151,3 +154,34 @@ Every HTTP request receives an `X-Request-ID`. The backend accepts an existing v
 At `INFO` level, logs describe the major lifecycle events: HTTP request boundaries, assistant stages, memory persistence, retrieval results, agent iterations, tool executions, and final response confidence. At `DEBUG` level, logs add message counts, input lengths, vector dimensions, resource loading, and external-client timings.
 
 Prompt text, memory values, embedding vectors, credentials, and full external responses are deliberately excluded. Use `requestId` to trace one HTTP request and `conversationId` to find requests belonging to the same conversation. Logging levels and the console pattern are configured under `logging` in `application.yml`.
+
+## Agent execution traces
+
+Each chat request creates an application-owned execution trace. The trace explains observable system behavior without recording hidden chain of thought. It contains timings, statuses, model and tool names, bounded tool arguments, retrieval counts, memory lookup counts, and controlled error categories. It deliberately excludes prompts, assembled model context, retrieved chunk contents, memory values, credentials, raw external responses, and private reasoning.
+
+The hierarchy is represented by globally unique `traceId` and `spanId` values plus each span's `parentSpanId`:
+
+```text
+Agent run
+    +--> Structured memory-extraction LLM call
+    +--> Memory lookup
+    +--> Agent iteration 1
+    |       +--> Agent LLM decision
+    |       +--> Tool call
+    |               +--> Knowledge-base search
+    |                       +--> Embedding generation
+    |                       +--> Qdrant vector search
+    +--> Agent iteration 2
+    |       +--> Agent LLM decision
+    +--> Final response
+```
+
+The parent relationship represents causality, not merely clock order. For example, embedding and vector-search spans are children of the knowledge search that required them, which is a child of the validated tool call selected in an agent iteration. The UI can reconstruct arbitrary nesting from these identifiers without hard-coding a fixed tree depth.
+
+`AssistantService` starts and completes the root trace. `AgentService` records iterations, `LLMClient` records every Ollama chat call, `ToolRegistry` records allowed and rejected tool requests, `KnowledgeBaseSearchTool` records retrieval intent and counts, the embedding and vector clients record external retrieval stages, and `MemoryService` records actual persistent-memory reads. Summary counts are derived from the recorded span types rather than maintained as separate mutable counters.
+
+`POST /chat` returns the summary with the assistant message, including the `traceId`, total duration, operation counts, and status. It does not return detailed spans. `GET /api/traces/{traceId}` returns an API DTO containing the full flat span set only when the user opens “View execution.” The generated `messageId` lets the frontend keep the summary associated with the exact assistant message that produced it.
+
+`TraceStore` separates trace capture from retention. The current `InMemoryTraceStore` keeps at most `trace.max-entries` completed traces and evicts the oldest trace when that bound is exceeded. Traces are therefore lost on restart, are not shared across application instances, and may return HTTP 404 after eviction. A production deployment can replace this implementation with durable storage without changing agent execution or the public trace contract.
+
+The internal trace model intentionally resembles OpenTelemetry spans—IDs, parent relationships, timestamps, duration, status, type, name, and attributes—without adding an OpenTelemetry dependency. A future exporter can map completed `AgentTrace` and `TraceSpan` records to an OpenTelemetry SDK or collector while retaining the current sanitization boundary and API DTOs.
