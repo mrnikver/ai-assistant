@@ -60,7 +60,7 @@ The memory API also exposes:
 
 ## Retrieval-augmented generation
 
-At application startup, `RunbookIndexer` loads `knowledge/deployment-runbook.txt`, splits it into chunks, creates an embedding for each chunk, and upserts those chunks into Qdrant.
+At application startup, `RunbookIndexer` loads `knowledge/deployment-runbook.txt`, splits it into chunks, and creates an embedding for the first chunk. The backend uses the resulting vector size to create the configured Qdrant collection with cosine distance when it does not already exist. It then creates the remaining embeddings and upserts all chunks into Qdrant.
 
 For each chat request, `RunbookRetriever`:
 

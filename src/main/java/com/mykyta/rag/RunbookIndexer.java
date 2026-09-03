@@ -43,10 +43,17 @@ public class RunbookIndexer implements ApplicationRunner {
         List<String> chunks =
                 textChunker.chunk(document);
 
+        boolean collectionInitialized = false;
+
         for (String chunk : chunks) {
 
             double[] embedding =
                     embeddingClient.embed(chunk);
+
+            if (!collectionInitialized) {
+                vectorStoreClient.ensureCollection(embedding.length);
+                collectionInitialized = true;
+            }
 
             vectorStoreClient.upsert(
                     chunk,
