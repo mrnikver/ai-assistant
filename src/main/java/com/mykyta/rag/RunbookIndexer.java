@@ -2,6 +2,7 @@ package com.mykyta.rag;
 
 import com.mykyta.client.EmbeddingClient;
 import com.mykyta.client.VectorStoreClient;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.io.ClassPathResource;
@@ -11,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @Component
+@Slf4j
 public class RunbookIndexer implements ApplicationRunner {
 
     private final TextChunker textChunker;
@@ -30,6 +32,9 @@ public class RunbookIndexer implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) throws Exception {
 
+        long startedAt = System.nanoTime();
+        log.info("Runbook indexing started");
+
         ClassPathResource resource =
                 new ClassPathResource(
                         "knowledge/deployment-runbook.txt"
@@ -42,6 +47,7 @@ public class RunbookIndexer implements ApplicationRunner {
 
         List<String> chunks =
                 textChunker.chunk(document);
+        log.info("Runbook chunking completed: chunkCount={}", chunks.size());
 
         boolean collectionInitialized = false;
 
@@ -60,9 +66,10 @@ public class RunbookIndexer implements ApplicationRunner {
                     embedding
             );
         }
-        //TODO: index documents only when documents change
-        System.out.println(
-                "Indexed " + chunks.size() + " runbook chunks"
+        log.info(
+                "Runbook indexing completed: chunkCount={}, durationMs={}",
+                chunks.size(),
+                (System.nanoTime() - startedAt) / 1_000_000
         );
     }
 }

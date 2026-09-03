@@ -27,3 +27,10 @@ spring:
       ddl-auto: update
     show-sql: true
     open-in-view: false
+
+logging:
+  level:
+    root: INFO
+    com.mykyta: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%thread] requestId=%X{requestId:-} conversationId=%X{conversationId:-} %logger{36} - %msg%n"

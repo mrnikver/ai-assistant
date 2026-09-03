@@ -9,6 +9,7 @@ import com.mykyta.response.AssistantResponse;
 import com.mykyta.response.MemoryExtractionResponse;
 import com.mykyta.tool.ToolDispatcher;
 import com.mykyta.util.JsonResourceLoader;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -17,6 +18,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
+@Slf4j
 public class AssistantService {
 
     private static final String SYSTEM_PROMPT = """
@@ -60,18 +62,20 @@ public class AssistantService {
     ) throws Exception {
 
         List<LLMMessage> context = new ArrayList<>();
+        log.info("Assistant flow started");
 
-        // 1. Extract persistent memory from the current user message
+        log.debug("Starting persistent memory extraction");
         MemoryExtractionResponse memoryCandidate =
                 memoryExtractorService.extract(userMessage);
 
-        System.out.println("Memory candidate: " + memoryCandidate);
-
         if (memoryCandidate.shouldStore()) {
+            log.info("Durable memory detected: key={}", memoryCandidate.key());
             memoryService.save(
                     memoryCandidate.key(),
                     memoryCandidate.value()
             );
+        } else {
+            log.debug("No durable memory detected");
         }
 
         context.add(
@@ -82,6 +86,7 @@ public class AssistantService {
         );
 
         List<Memory> memories = memoryService.getAll();
+        log.debug("Adding persistent memory to context: count={}", memories.size());
 
         if (!memories.isEmpty()) {
 
@@ -106,8 +111,7 @@ public class AssistantService {
         String retrievedKnowledge = knowledgeRetriever.retrieve(
                         userMessage
                 );
-
-//        System.out.println(retrievedKnowledge);
+        log.debug("Adding retrieved knowledge to context: characterCount={}", retrievedKnowledge.length());
 
         context.add(
                 new LLMMessage(
@@ -133,6 +137,7 @@ public class AssistantService {
                         assistantProperties.historyLimit()
                 )
         );
+        log.debug("Recent conversation history added: contextMessageCount={}", context.size());
 
         LLMMessage currentUserMessage =
                 new LLMMessage(
@@ -157,14 +162,16 @@ public class AssistantService {
                         deploymentStatusTool,
                         deploymentLogsTool
                 );
+        log.debug("Tool definitions loaded: count={}", tools.size());
 
         // Agent performs zero or more tool interactions.
         agentService.run(
                 context,
                 tools
         );
+        log.debug("Tool-calling stage completed: contextMessageCount={}", context.size());
 
-        // Generate final structured response.
+        log.debug("Starting final structured response generation");
         AssistantResponse answer = llmClient.chat(context);
 
         conversationService.add(
@@ -179,6 +186,8 @@ public class AssistantService {
                         answer.answer()
                 )
         );
+
+        log.info("Assistant flow completed: confidence={}", answer.confidence());
 
         return answer;
     }

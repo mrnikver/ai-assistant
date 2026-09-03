@@ -6,6 +6,7 @@ import com.mykyta.config.QdrantProperties;
 import com.mykyta.model.QdrantPoint;
 import com.mykyta.model.QdrantSearchResult;
 import com.mykyta.model.QdrantUpsertRequest;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -20,6 +21,7 @@ import java.util.Map;
 import java.util.UUID;
 
 @Component
+@Slf4j
 public class VectorStoreClient {
 
     private final HttpClient httpClient;
@@ -36,6 +38,7 @@ public class VectorStoreClient {
     }
 
     public void ensureCollection(int vectorSize) throws IOException, InterruptedException {
+        log.info("Checking Qdrant collection: collection={}", properties.collection());
         URI collectionUri = collectionUri();
         HttpRequest getRequest = HttpRequest.newBuilder(collectionUri)
                 .GET()
@@ -47,10 +50,16 @@ public class VectorStoreClient {
         );
 
         if (getResponse.statusCode() == 200) {
+            log.info("Qdrant collection is ready: collection={}", properties.collection());
             return;
         }
 
         if (getResponse.statusCode() != 404) {
+            log.error(
+                    "Qdrant collection lookup failed: collection={}, status={}",
+                    properties.collection(),
+                    getResponse.statusCode()
+            );
             throw new RuntimeException(
                     "Qdrant collection lookup failed: "
                             + getResponse.statusCode()
@@ -65,6 +74,11 @@ public class VectorStoreClient {
                         "distance", "Cosine"
                 )
         );
+        log.info(
+                "Creating Qdrant collection: collection={}, vectorSize={}, distance=Cosine",
+                properties.collection(),
+                vectorSize
+        );
 
         HttpRequest createRequest = HttpRequest.newBuilder(collectionUri)
                 .header("Content-Type", "application/json")
@@ -77,6 +91,11 @@ public class VectorStoreClient {
         );
 
         if (createResponse.statusCode() != 200) {
+            log.error(
+                    "Qdrant collection creation failed: collection={}, status={}",
+                    properties.collection(),
+                    createResponse.statusCode()
+            );
             throw new RuntimeException(
                     "Qdrant collection creation failed: "
                             + createResponse.statusCode()
@@ -84,12 +103,17 @@ public class VectorStoreClient {
                             + createResponse.body()
             );
         }
+
+        log.info("Qdrant collection created: collection={}", properties.collection());
     }
 
     public void upsert(
             String text,
             double[] vector
     ) throws IOException, InterruptedException {
+
+        long startedAt = System.nanoTime();
+        log.debug("Qdrant upsert started: collection={}, vectorSize={}", properties.collection(), vector.length);
 
         QdrantPoint point =
                 new QdrantPoint(
@@ -130,6 +154,12 @@ public class VectorStoreClient {
                 );
 
         if (response.statusCode() != 200) {
+            log.error(
+                    "Qdrant upsert failed: collection={}, status={}, durationMs={}",
+                    properties.collection(),
+                    response.statusCode(),
+                    elapsedMilliseconds(startedAt)
+            );
             throw new RuntimeException(
                     "Qdrant upsert failed: "
                             + response.statusCode()
@@ -137,12 +167,27 @@ public class VectorStoreClient {
                             + response.body()
             );
         }
+
+        log.debug(
+                "Qdrant upsert completed: collection={}, status={}, durationMs={}",
+                properties.collection(),
+                response.statusCode(),
+                elapsedMilliseconds(startedAt)
+        );
     }
 
     public List<QdrantSearchResult> search(
             double[] queryVector,
             int limit
     ) throws IOException, InterruptedException {
+
+        long startedAt = System.nanoTime();
+        log.debug(
+                "Qdrant search started: collection={}, vectorSize={}, limit={}",
+                properties.collection(),
+                queryVector.length,
+                limit
+        );
 
         Map<String, Object> body = Map.of(
                 "query", queryVector,
@@ -175,6 +220,12 @@ public class VectorStoreClient {
                 );
 
         if (response.statusCode() != 200) {
+            log.error(
+                    "Qdrant search failed: collection={}, status={}, durationMs={}",
+                    properties.collection(),
+                    response.statusCode(),
+                    elapsedMilliseconds(startedAt)
+            );
             throw new RuntimeException(
                     "Qdrant search failed: "
                             + response.statusCode()
@@ -204,6 +255,13 @@ public class VectorStoreClient {
             );
         }
 
+        log.debug(
+                "Qdrant search completed: collection={}, resultCount={}, durationMs={}",
+                properties.collection(),
+                results.size(),
+                elapsedMilliseconds(startedAt)
+        );
+
         return results;
     }
 
@@ -213,5 +271,9 @@ public class VectorStoreClient {
                         + "/collections/"
                         + properties.collection()
         );
+    }
+
+    private long elapsedMilliseconds(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000;
     }
 }
