@@ -142,3 +142,11 @@ If the tool-selection call returns no tool calls, its textual response is not us
 | `assistant.history-limit` | Maximum recent conversation messages added to context |
 | `agent.max-iterations` | Maximum number of tool-selection iterations |
 | `spring.datasource.*` | PostgreSQL connection settings |
+
+## Request-flow logging
+
+Every HTTP request receives an `X-Request-ID`. The backend accepts an existing value from the request header or generates a UUID, returns it in the response header, and includes it in every log entry produced on the request thread. Chat requests also include their conversation ID in the logging context.
+
+At `INFO` level, logs describe the major lifecycle events: HTTP request boundaries, assistant stages, memory persistence, retrieval results, agent iterations, tool executions, and final response confidence. At `DEBUG` level, logs add message counts, input lengths, vector dimensions, resource loading, and external-client timings.
+
+Prompt text, memory values, embedding vectors, credentials, and full external responses are deliberately excluded. Use `requestId` to trace one HTTP request and `conversationId` to find requests belonging to the same conversation. Logging levels and the console pattern are configured under `logging` in `application.yml`.

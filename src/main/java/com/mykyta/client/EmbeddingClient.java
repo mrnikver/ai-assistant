@@ -3,6 +3,7 @@ package com.mykyta.client;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mykyta.config.EmbeddingProperties;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -13,6 +14,7 @@ import java.net.http.HttpResponse;
 import java.util.Map;
 
 @Component
+@Slf4j
 public class EmbeddingClient {
 
     private final HttpClient httpClient;
@@ -30,6 +32,9 @@ public class EmbeddingClient {
 
     public double[] embed(String text)
             throws IOException, InterruptedException {
+
+        long startedAt = System.nanoTime();
+        log.debug("Embedding request started: model={}, inputLength={}", properties.model(), text.length());
 
         Map<String, Object> body = Map.of(
                 "model", properties.model(),
@@ -58,6 +63,12 @@ public class EmbeddingClient {
                 );
 
         if (response.statusCode() != 200) {
+            log.error(
+                    "Embedding request failed: model={}, status={}, durationMs={}",
+                    properties.model(),
+                    response.statusCode(),
+                    elapsedMilliseconds(startedAt)
+            );
             throw new RuntimeException(
                     "Embedding request failed: "
                             + response.statusCode()
@@ -71,9 +82,21 @@ public class EmbeddingClient {
                         .path("embeddings")
                         .get(0);
 
-        return objectMapper.treeToValue(
+        double[] vector = objectMapper.treeToValue(
                 embeddings,
                 double[].class
         );
+
+        log.debug(
+                "Embedding request completed: model={}, dimensions={}, durationMs={}",
+                properties.model(),
+                vector.length,
+                elapsedMilliseconds(startedAt)
+        );
+        return vector;
+    }
+
+    private long elapsedMilliseconds(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000;
     }
 }

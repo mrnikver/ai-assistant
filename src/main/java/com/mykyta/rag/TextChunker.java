@@ -1,5 +1,6 @@
 package com.mykyta.rag;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -7,9 +8,12 @@ import java.util.Arrays;
 import java.util.List;
 
 @Component
+@Slf4j
 public class TextChunker {
 
     public List<String> chunk(String document) {
+
+        log.debug("Document chunking started: characterCount={}", document.length());
 
         List<String> paragraphs = Arrays.stream(
                         document.split("\\R\\s*\\R")
@@ -35,6 +39,7 @@ public class TextChunker {
             chunks.add(current);
         }
 
+        log.debug("Document chunking completed: paragraphCount={}, chunkCount={}", paragraphs.size(), chunks.size());
         return chunks;
     }
 }

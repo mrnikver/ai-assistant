@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mykyta.model.LLMMessage;
 import com.mykyta.model.OllamaChatRequest;
 import com.mykyta.response.AssistantResponse;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.net.URI;
@@ -14,6 +15,7 @@ import java.net.http.HttpResponse;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 public class LLMClient {
 
     private final HttpClient httpClient;
@@ -52,6 +54,13 @@ public class LLMClient {
             Class<T> responseType
     ) throws IOException, InterruptedException {
 
+        log.debug(
+                "Structured LLM request prepared: model={}, responseType={}, messageCount={}",
+                model,
+                responseType.getSimpleName(),
+                messages.size()
+        );
+
         OllamaChatRequest body =
                 new OllamaChatRequest(
                         model,
@@ -79,6 +88,13 @@ public class LLMClient {
             List<Map<String, Object>> tools
     ) throws IOException, InterruptedException {
 
+        log.debug(
+                "Tool-enabled LLM request prepared: model={}, messageCount={}, toolCount={}",
+                model,
+                messages.size(),
+                tools.size()
+        );
+
         OllamaChatRequest body =
                 new OllamaChatRequest(
                         model,
@@ -100,6 +116,8 @@ public class LLMClient {
             OllamaChatRequest body
     ) throws IOException, InterruptedException {
 
+        long startedAt = System.nanoTime();
+
         String json =
                 objectMapper.writeValueAsString(body);
 
@@ -116,6 +134,12 @@ public class LLMClient {
                 );
 
         if (response.statusCode() != 200) {
+            log.error(
+                    "LLM request failed: model={}, status={}, durationMs={}",
+                    model,
+                    response.statusCode(),
+                    elapsedMilliseconds(startedAt)
+            );
             throw new RuntimeException(
                     "LLM request failed: "
                             + response.statusCode()
@@ -124,8 +148,19 @@ public class LLMClient {
             );
         }
 
+        log.debug(
+                "LLM request completed: model={}, status={}, durationMs={}",
+                model,
+                response.statusCode(),
+                elapsedMilliseconds(startedAt)
+        );
+
         return objectMapper.readTree(
                 response.body()
         );
+    }
+
+    private long elapsedMilliseconds(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000;
     }
 }

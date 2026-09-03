@@ -4,12 +4,14 @@ import com.mykyta.client.LLMClient;
 import com.mykyta.model.LLMMessage;
 import com.mykyta.response.MemoryExtractionResponse;
 import com.mykyta.util.JsonResourceLoader;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
 
 @Service
+@Slf4j
 public class MemoryExtractorService {
 
     private static final String SYSTEM_PROMPT = """
@@ -68,10 +70,19 @@ public class MemoryExtractorService {
                 )
         );
 
-        return llmClient.structuredChat(
+        long startedAt = System.nanoTime();
+        MemoryExtractionResponse response = llmClient.structuredChat(
                 messages,
                 schema,
                 MemoryExtractionResponse.class
         );
+
+        log.debug(
+                "Memory extraction completed: shouldStore={}, key={}, durationMs={}",
+                response.shouldStore(),
+                response.key(),
+                (System.nanoTime() - startedAt) / 1_000_000
+        );
+        return response;
     }
 }
