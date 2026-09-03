@@ -59,7 +59,7 @@ The memory API also exposes:
 
 ## Retrieval-augmented generation
 
-At application startup, `RunbookIndexer` loads `knowledge/deployment-runbook.txt`, splits it into chunks, and creates an embedding for the first chunk. The backend uses the resulting vector size to create the configured Qdrant collection with cosine distance when it does not already exist. It then creates the remaining embeddings and upserts all chunks into Qdrant.
+At application startup, `RunbookIndexer` loads `knowledge/deployment-runbook.txt`, and `ProjectKnowledgeIndexer` recursively scans the configured backend and UI roots for Java, Markdown, TypeScript, and TSX documents. Source files are split on headings and code declarations, with bounded line-based chunks for large sections. Each project chunk carries its project, repository-relative path, language, symbol or heading context, and line range. Both indexers use the configured embedding client and upsert into the same Qdrant collection. Stable source-based point IDs make re-indexing idempotent, and stale project points are removed after a successful scan.
 
 When the LLM requests `search_knowledge_base`, `KnowledgeBaseSearchTool` delegates to `RunbookRetriever`, which:
 

@@ -117,6 +117,7 @@ public class KnowledgeBaseSearchTool implements Tool {
                             .append(index + 1)
                             .append("] score=")
                             .append(result.score())
+                            .append(formatSource(result.metadata()))
                             .append('\n')
                             .append(result.text())
                             .append('\n');
@@ -127,6 +128,32 @@ public class KnowledgeBaseSearchTool implements Tool {
                 throw new ToolExecutionException("Knowledge-base search failed", exception);
             }
         }
+    }
+
+    private String formatSource(Map<String, Object> metadata) {
+        Object path = metadata.get("source_path");
+        if (path == null) {
+            return "";
+        }
+        StringBuilder source = new StringBuilder(" source=");
+        Object project = metadata.get("project");
+        if (project != null) {
+            source.append(project).append('/');
+        }
+        source.append(path);
+        Object startLine = metadata.get("start_line");
+        Object endLine = metadata.get("end_line");
+        if (startLine != null) {
+            source.append(':').append(startLine);
+            if (endLine != null && !endLine.equals(startLine)) {
+                source.append('-').append(endLine);
+            }
+        }
+        Object context = metadata.get("context");
+        if (context != null && !context.toString().isBlank()) {
+            source.append(" context=").append(context);
+        }
+        return source.toString();
     }
 
     private String requireQuery(Object value) {

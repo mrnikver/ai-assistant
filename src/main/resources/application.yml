@@ -19,6 +19,13 @@ qdrant:
   base-url: http://192.168.0.112:6333
   collection: deployment-runbook
 
+project-knowledge:
+  enabled: true
+  roots:
+    - ${PROJECT_KNOWLEDGE_BACKEND_ROOT:${user.dir}}
+    - ${PROJECT_KNOWLEDGE_UI_ROOT:${user.dir}/../ai-assistant-ui}
+  max-chunk-characters: 2400
+
 spring:
   datasource:
     url: jdbc:postgresql://192.168.0.112:5432/ai_assistant
