@@ -9,6 +9,9 @@ import com.mykyta.model.ToolCall;
 import com.mykyta.model.ToolResult;
 import com.mykyta.response.AssistantResponse;
 import com.mykyta.tool.ToolRegistry;
+import com.mykyta.trace.AgentTracer;
+import com.mykyta.trace.TraceScope;
+import com.mykyta.trace.TraceSpanType;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -34,6 +37,7 @@ public class AgentService {
     private final LLMClient llmClient;
     private final ToolRegistry toolRegistry;
     private final AgentProperties agentProperties;
+    private final AgentTracer agentTracer;
 
     /**
      * Creates the agent orchestrator from its model, capability, and safety boundaries.
@@ -41,15 +45,18 @@ public class AgentService {
      * @param llmClient Ollama client used for every model decision
      * @param toolRegistry allow-list and executor for model-requested tools
      * @param agentProperties iteration safety configuration
+     * @param agentTracer request-local observable event collector
      */
     public AgentService(
             LLMClient llmClient,
             ToolRegistry toolRegistry,
-            AgentProperties agentProperties
+            AgentProperties agentProperties,
+            AgentTracer agentTracer
     ) {
         this.llmClient = llmClient;
         this.toolRegistry = toolRegistry;
         this.agentProperties = agentProperties;
+        this.agentTracer = agentTracer;
     }
 
     /**
@@ -81,35 +88,43 @@ public class AgentService {
             long startedAt = System.nanoTime();
             log.debug("Agent iteration started: iteration={}", iterationNumber);
 
-            LLMMessage llmResponse = llmClient.chatWithTools(
-                    context,
-                    tools
-            );
+            try (TraceScope iterationSpan = agentTracer.startSpan(TraceSpanType.AGENT_ITERATION, "Agent iteration")) {
+                iterationSpan.metadata("iteration", iterationNumber);
+                LLMMessage llmResponse;
+                try {
+                    llmResponse = llmClient.chatWithTools(context, tools);
+                } catch (IOException | InterruptedException exception) {
+                    iterationSpan.fail(exception);
+                    throw exception;
+                }
 
-            List<ToolCall> toolCalls = llmResponse.toolCalls();
+                List<ToolCall> toolCalls = llmResponse.toolCalls();
 
-            if (toolCalls == null || toolCalls.isEmpty()) {
-                AssistantResponse finalResponse = llmClient.parseAssistantResponse(llmResponse);
+                if (toolCalls == null || toolCalls.isEmpty()) {
+                    AssistantResponse finalResponse;
+                    try {
+                        finalResponse = llmClient.parseAssistantResponse(llmResponse);
+                    } catch (IOException exception) {
+                        iterationSpan.fail(exception);
+                        throw exception;
+                    }
+                    log.info(
+                            "Agent completed: iteration={}, toolExecutions={}, confidence={}, durationMs={}",
+                            iterationNumber, toolExecutions, finalResponse.confidence(), elapsedMilliseconds(startedAt)
+                    );
+                    return new AgentResult(finalResponse, iterationNumber, toolExecutions);
+                }
+
                 log.info(
-                        "Agent completed: iteration={}, toolExecutions={}, confidence={}, durationMs={}",
-                        iterationNumber,
-                        toolExecutions,
-                        finalResponse.confidence(),
-                        elapsedMilliseconds(startedAt)
-                );
-                return new AgentResult(finalResponse, iterationNumber, toolExecutions);
-            }
-
-            log.info(
                     "Agent requested tools: iteration={}, toolCallCount={}, durationMs={}",
                     iterationNumber,
                     toolCalls.size(),
                     elapsedMilliseconds(startedAt)
             );
 
-            context.add(llmResponse);
+                context.add(llmResponse);
 
-            for (ToolCall toolCall : toolCalls) {
+                for (ToolCall toolCall : toolCalls) {
                 String toolName = toolCall.function() == null ? "unknown" : toolCall.function().name();
                 Map<String, Object> arguments = toolCall.function() == null
                         || toolCall.function().arguments() == null
@@ -129,14 +144,15 @@ public class AgentService {
 
                 // Feed observations back to the model so it can decide whether
                 // another action is required or it can answer the user.
-                context.add(
+                    context.add(
                         new LLMMessage(
                                 "tool",
                                 toolResult.asObservation(),
                                 null,
                                 toolName
                         )
-                );
+                    );
+                }
             }
         }
 

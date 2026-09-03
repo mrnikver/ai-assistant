@@ -3,9 +3,15 @@ package com.mykyta.service;
 import com.mykyta.config.AssistantProperties;
 import com.mykyta.entity.Memory;
 import com.mykyta.model.AgentResult;
+import com.mykyta.model.AssistantExecution;
 import com.mykyta.model.LLMMessage;
 import com.mykyta.response.AssistantResponse;
 import com.mykyta.response.MemoryExtractionResponse;
+import com.mykyta.response.TraceSummaryResponse;
+import com.mykyta.trace.AgentTrace;
+import com.mykyta.trace.AgentTracer;
+import com.mykyta.trace.TraceScope;
+import com.mykyta.trace.TraceSpanType;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -42,6 +48,8 @@ public class AssistantService {
     private final AssistantProperties assistantProperties;
     private final MemoryService memoryService;
     private final MemoryExtractorService memoryExtractorService;
+    private final AgentTracer agentTracer;
+    private final TraceService traceService;
 
 
     /**
@@ -52,19 +60,25 @@ public class AssistantService {
      * @param assistantProperties conversation-context limits
      * @param memoryService persistent structured memory
      * @param memoryExtractorService model-based durable-memory extractor
+     * @param agentTracer root execution-trace lifecycle manager
+     * @param traceService completed trace retention and summary service
      */
     public AssistantService(
             ConversationService conversationService,
             AgentService agentService,
             AssistantProperties assistantProperties,
             MemoryService memoryService,
-            MemoryExtractorService memoryExtractorService
+            MemoryExtractorService memoryExtractorService,
+            AgentTracer agentTracer,
+            TraceService traceService
     ) {
         this.conversationService = conversationService;
         this.agentService = agentService;
         this.assistantProperties = assistantProperties;
         this.memoryService = memoryService;
         this.memoryExtractorService = memoryExtractorService;
+        this.agentTracer = agentTracer;
+        this.traceService = traceService;
     }
 
     /**
@@ -75,10 +89,29 @@ public class AssistantService {
      * @return final structured assistant response
      * @throws Exception if memory extraction, LLM communication, or agent execution fails
      */
-    public AssistantResponse chat(
+    public AssistantExecution chat(
             String conversationId,
             String userMessage
     ) throws Exception {
+
+        AgentTracer.TraceSession traceSession = agentTracer.beginTrace();
+        AssistantResponse answer;
+        try {
+            answer = executeAssistantFlow(conversationId, userMessage);
+        } catch (Exception exception) {
+            traceSession.fail(exception);
+            traceSession.close();
+            traceService.save(traceSession.completedTrace());
+            throw exception;
+        }
+
+        traceSession.close();
+        AgentTrace trace = traceSession.completedTrace();
+        TraceSummaryResponse summary = traceService.save(trace);
+        return new AssistantExecution(answer, summary);
+    }
+
+    private AssistantResponse executeAssistantFlow(String conversationId, String userMessage) throws Exception {
 
         List<LLMMessage> context = new ArrayList<>();
         log.info("Assistant flow started");
@@ -165,7 +198,11 @@ public class AssistantService {
                 )
         );
 
-        log.info("Assistant flow completed: confidence={}", answer.confidence());
+        try (TraceScope finalResponse = agentTracer.startSpan(TraceSpanType.FINAL_RESPONSE, "Final response")) {
+            finalResponse.metadata("confidence", answer.confidence().name());
+            finalResponse.metadata("answerLength", answer.answer().length());
+            log.info("Assistant flow completed: confidence={}", answer.confidence());
+        }
 
         return answer;
     }

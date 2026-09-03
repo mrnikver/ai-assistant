@@ -4,6 +4,10 @@ import com.mykyta.model.QdrantSearchResult;
 import com.mykyta.rag.KnowledgeRetriever;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import com.mykyta.trace.AgentTracer;
+import com.mykyta.trace.TraceSanitizer;
+import com.mykyta.trace.TraceScope;
+import com.mykyta.trace.TraceSpanType;
 
 import java.util.List;
 import java.util.Map;
@@ -58,14 +62,17 @@ public class KnowledgeBaseSearchTool implements Tool {
     );
 
     private final KnowledgeRetriever knowledgeRetriever;
+    private final AgentTracer agentTracer;
 
     /**
      * Creates the agent-facing adapter around the existing retrieval service.
      *
      * @param knowledgeRetriever embedding and vector-search capability
+     * @param agentTracer collector used to nest retrieval work below the tool call
      */
-    public KnowledgeBaseSearchTool(KnowledgeRetriever knowledgeRetriever) {
+    public KnowledgeBaseSearchTool(KnowledgeRetriever knowledgeRetriever, AgentTracer agentTracer) {
         this.knowledgeRetriever = knowledgeRetriever;
+        this.agentTracer = agentTracer;
     }
 
     @Override
@@ -92,26 +99,33 @@ public class KnowledgeBaseSearchTool implements Tool {
         int topK = resolveTopK(arguments.get("topK"));
         log.info("Knowledge-base search requested: queryLength={}, topK={}", query.length(), topK);
 
-        try {
-            List<QdrantSearchResult> results = knowledgeRetriever.retrieve(query, topK);
-            if (results.isEmpty()) {
-                return "No relevant knowledge-base chunks were found.";
-            }
+        try (TraceScope span = agentTracer.startSpan(TraceSpanType.KNOWLEDGE_SEARCH, "Knowledge-base search")) {
+            span.metadata("query", TraceSanitizer.text(query));
+            span.metadata("requestedTopK", arguments.getOrDefault("topK", "default"));
+            span.metadata("effectiveTopK", topK);
+            try {
+                List<QdrantSearchResult> results = knowledgeRetriever.retrieve(query, topK);
+                span.metadata("resultCount", results.size());
+                if (results.isEmpty()) {
+                    return "No relevant knowledge-base chunks were found.";
+                }
 
-            StringBuilder observation = new StringBuilder("Retrieved knowledge-base chunks:\n");
-            for (int index = 0; index < results.size(); index++) {
-                QdrantSearchResult result = results.get(index);
-                observation.append("\n[")
-                        .append(index + 1)
-                        .append("] score=")
-                        .append(result.score())
-                        .append('\n')
-                        .append(result.text())
-                        .append('\n');
+                StringBuilder observation = new StringBuilder("Retrieved knowledge-base chunks:\n");
+                for (int index = 0; index < results.size(); index++) {
+                    QdrantSearchResult result = results.get(index);
+                    observation.append("\n[")
+                            .append(index + 1)
+                            .append("] score=")
+                            .append(result.score())
+                            .append('\n')
+                            .append(result.text())
+                            .append('\n');
+                }
+                return observation.toString().trim();
+            } catch (RuntimeException exception) {
+                span.fail(exception);
+                throw new ToolExecutionException("Knowledge-base search failed", exception);
             }
-            return observation.toString().trim();
-        } catch (RuntimeException exception) {
-            throw new ToolExecutionException("Knowledge-base search failed", exception);
         }
     }
 

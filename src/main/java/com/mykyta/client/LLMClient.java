@@ -7,6 +7,9 @@ import com.mykyta.model.Confidence;
 import com.mykyta.model.LLMMessage;
 import com.mykyta.model.OllamaChatRequest;
 import com.mykyta.response.AssistantResponse;
+import com.mykyta.trace.AgentTracer;
+import com.mykyta.trace.TraceScope;
+import com.mykyta.trace.TraceSpanType;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
@@ -32,6 +35,7 @@ public class LLMClient {
     private final String baseUrl;
     private final String model;
     private final Map<String, Object> structuredOutputSchema;
+    private final AgentTracer agentTracer;
 
     /**
      * Creates an Ollama client using one configured model and final-answer schema.
@@ -40,18 +44,21 @@ public class LLMClient {
      * @param model model name used for inference
      * @param objectMapper JSON serializer
      * @param structuredOutputSchema JSON schema required for final assistant answers
+     * @param agentTracer collector that records safe model-call metadata and duration
      */
     public LLMClient(
             String baseUrl,
             String model,
             ObjectMapper objectMapper,
-            Map<String, Object> structuredOutputSchema
+            Map<String, Object> structuredOutputSchema,
+            AgentTracer agentTracer
     ) {
         this.httpClient = HttpClient.newHttpClient();
         this.objectMapper = objectMapper;
         this.baseUrl = baseUrl;
         this.model = model;
         this.structuredOutputSchema = structuredOutputSchema;
+        this.agentTracer = agentTracer;
     }
 
     /**
@@ -106,17 +113,17 @@ public class LLMClient {
                         null
                 );
 
-        JsonNode response = send(body);
-
-        String content = response
-                .path("message")
-                .path("content")
-                .asText();
-
-        return objectMapper.readValue(
-                content,
-                responseType
-        );
+        try (TraceScope span = llmSpan("Structured LLM call")) {
+            span.metadata("resultType", responseType.getSimpleName());
+            try {
+                JsonNode response = send(body);
+                String content = response.path("message").path("content").asText();
+                return objectMapper.readValue(content, responseType);
+            } catch (IOException | InterruptedException | RuntimeException exception) {
+                span.fail(exception);
+                throw exception;
+            }
+        }
     }
 
     /**
@@ -154,12 +161,20 @@ public class LLMClient {
                         tools
                 );
 
-        JsonNode response = send(body);
-
-        return objectMapper.treeToValue(
-                response.path("message"),
-                LLMMessage.class
-        );
+        try (TraceScope span = llmSpan("Agent LLM decision")) {
+            try {
+                JsonNode response = send(body);
+                LLMMessage message = objectMapper.treeToValue(response.path("message"), LLMMessage.class);
+                List<String> toolNames = message.toolCalls() == null ? List.of() : message.toolCalls().stream()
+                        .map(call -> call.function() == null ? "unknown" : call.function().name()).toList();
+                span.metadata("resultType", toolNames.isEmpty() ? "FINAL_RESPONSE" : "TOOL_CALLS");
+                span.metadata("toolNames", toolNames);
+                return message;
+            } catch (IOException | InterruptedException | RuntimeException exception) {
+                span.fail(exception);
+                throw exception;
+            }
+        }
     }
 
     /**
@@ -231,6 +246,14 @@ public class LLMClient {
         return objectMapper.readTree(
                 response.body()
         );
+    }
+
+    private TraceScope llmSpan(String name) {
+        TraceScope span = agentTracer.startSpan(TraceSpanType.LLM_CALL, name);
+        span.metadata("callNumber", agentTracer.nextLlmCallNumber());
+        span.metadata("model", model);
+        span.metadata("iteration", agentTracer.currentIteration());
+        return span;
     }
 
     private long elapsedMilliseconds(long startedAt) {

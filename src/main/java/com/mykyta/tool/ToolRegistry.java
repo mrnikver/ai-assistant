@@ -4,6 +4,10 @@ import com.mykyta.model.ToolCall;
 import com.mykyta.model.ToolResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import com.mykyta.trace.AgentTracer;
+import com.mykyta.trace.TraceScope;
+import com.mykyta.trace.TraceSpanType;
+import com.mykyta.trace.TraceSanitizer;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -31,14 +35,17 @@ import java.util.stream.Collectors;
 public class ToolRegistry {
 
     private final Map<String, Tool> tools;
+    private final AgentTracer agentTracer;
 
     /**
      * Builds a registry from Spring-managed tools and rejects duplicate names at startup.
      *
      * @param registeredTools explicitly registered application tools
+     * @param agentTracer collector used to record allowed and rejected tool requests
      * @throws IllegalStateException if two tools expose the same name
      */
-    public ToolRegistry(List<Tool> registeredTools) {
+    public ToolRegistry(List<Tool> registeredTools, AgentTracer agentTracer) {
+        this.agentTracer = agentTracer;
         this.tools = Collections.unmodifiableMap(registeredTools.stream().collect(Collectors.toMap(
                 Tool::name,
                 Function.identity(),
@@ -65,7 +72,26 @@ public class ToolRegistry {
      * @return success or controlled failure to add back to the agent conversation
      */
     public ToolResult execute(ToolCall toolCall) {
+        String requestedName = toolCall == null || toolCall.function() == null
+                ? "unknown" : String.valueOf(toolCall.function().name());
+        try (TraceScope span = agentTracer.startSpan(TraceSpanType.TOOL_CALL, "Tool: " + requestedName)) {
+            span.metadata("toolName", requestedName);
+            span.metadata("iteration", agentTracer.currentIteration());
+            ToolResult result = executeRegistered(toolCall, span);
+            span.metadata("successful", result.successful());
+            span.metadata("resultLength", result.content().length());
+            span.metadata("resultSummary", result.successful() ? "Observation returned" : "Controlled failure returned");
+            if (!result.successful()) {
+                span.metadata("error", result.content());
+                span.fail(new IllegalStateException("Controlled tool failure"));
+            }
+            return result;
+        }
+    }
+
+    private ToolResult executeRegistered(ToolCall toolCall, TraceScope span) {
         if (toolCall == null || toolCall.function() == null || toolCall.function().name() == null) {
+            span.metadata("argumentNames", List.of());
             return ToolResult.failure("unknown", "Malformed tool call: function name is required");
         }
 
@@ -79,6 +105,8 @@ public class ToolRegistry {
         Map<String, Object> arguments = toolCall.function().arguments() == null
                 ? Map.of()
                 : toolCall.function().arguments();
+        span.metadata("argumentNames", arguments.keySet().stream().sorted().toList());
+        span.metadata("arguments", TraceSanitizer.arguments(arguments));
 
         try {
             return ToolResult.success(toolName, tool.execute(arguments));

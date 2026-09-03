@@ -8,6 +8,9 @@ import com.mykyta.model.QdrantSearchResult;
 import com.mykyta.model.QdrantUpsertRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import com.mykyta.trace.AgentTracer;
+import com.mykyta.trace.TraceScope;
+import com.mykyta.trace.TraceSpanType;
 
 import java.io.IOException;
 import java.net.URI;
@@ -20,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+/** Owns Qdrant collection operations and traces request-time vector searches without vector payloads. */
 @Component
 @Slf4j
 public class VectorStoreClient {
@@ -27,16 +31,31 @@ public class VectorStoreClient {
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final QdrantProperties properties;
+    private final AgentTracer agentTracer;
 
+    /**
+     * Creates the vector-store transport.
+     * @param objectMapper JSON serializer
+     * @param properties Qdrant endpoint and collection configuration
+     * @param agentTracer request trace collector
+     */
     public VectorStoreClient(
             ObjectMapper objectMapper,
-            QdrantProperties properties
+            QdrantProperties properties,
+            AgentTracer agentTracer
     ) {
         this.httpClient = HttpClient.newHttpClient();
         this.objectMapper = objectMapper;
         this.properties = properties;
+        this.agentTracer = agentTracer;
     }
 
+    /**
+     * Creates the configured collection when startup indexing finds it absent.
+     * @param vectorSize embedding dimensions used by the collection
+     * @throws IOException when transport or serialization fails
+     * @throws InterruptedException when the HTTP request is interrupted
+     */
     public void ensureCollection(int vectorSize) throws IOException, InterruptedException {
         log.info("Checking Qdrant collection: collection={}", properties.collection());
         URI collectionUri = collectionUri();
@@ -107,6 +126,13 @@ public class VectorStoreClient {
         log.info("Qdrant collection created: collection={}", properties.collection());
     }
 
+    /**
+     * Stores one runbook chunk and vector during indexing.
+     * @param text source chunk stored as Qdrant payload
+     * @param vector embedding for similarity search
+     * @throws IOException when transport or serialization fails
+     * @throws InterruptedException when the HTTP request is interrupted
+     */
     public void upsert(
             String text,
             double[] vector
@@ -176,10 +202,35 @@ public class VectorStoreClient {
         );
     }
 
+    /**
+     * Finds nearest chunks and records count, scores, and duration under an active knowledge search.
+     * @param queryVector query embedding; vector values are never traced
+     * @param limit maximum number of results
+     * @return matching chunks for the retrieval layer
+     * @throws IOException when transport or response parsing fails
+     * @throws InterruptedException when the HTTP request is interrupted
+     */
     public List<QdrantSearchResult> search(
             double[] queryVector,
             int limit
     ) throws IOException, InterruptedException {
+
+        try (TraceScope span = agentTracer.startSpan(TraceSpanType.VECTOR_SEARCH, "Qdrant vector search")) {
+            span.metadata("collection", properties.collection());
+            span.metadata("limit", limit);
+            try {
+                List<QdrantSearchResult> results = doSearch(queryVector, limit);
+                span.metadata("resultCount", results.size());
+                span.metadata("scores", results.stream().map(QdrantSearchResult::score).toList());
+                return results;
+            } catch (IOException | InterruptedException | RuntimeException exception) {
+                span.fail(exception);
+                throw exception;
+            }
+        }
+    }
+
+    private List<QdrantSearchResult> doSearch(double[] queryVector, int limit) throws IOException, InterruptedException {
 
         long startedAt = System.nanoTime();
         log.debug(
