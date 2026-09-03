@@ -74,7 +74,9 @@ Each agent loop sends its current context and exact allow-list to Ollama. Reques
 
 ## Persistent memory and conversation history
 
-`MemoryExtractorService` performs a structured LLM call before orchestration. Accepted application-wide facts are upserted in PostgreSQL and supplied only to the Supervisor. `ConversationService` stores recent user messages and final answers in memory by conversation ID. Specialist prompts, delegations, retrieved chunks, and runtime observations are not persisted in conversation history.
+`MemoryExtractorService` performs a structured LLM call before orchestration. Accepted application-wide facts are upserted in PostgreSQL and supplied only to the Supervisor. `POST /memory` saves a supported memory, `GET /memory` lists current memories, and `DELETE /memory` transactionally deletes every persistent-memory row and returns the deleted count. The UI exposes the delete operation as “Reset persistent memory” behind an explicit destructive confirmation. This reset affects only PostgreSQL memory; it does not clear conversation history, Qdrant/RAG knowledge, execution traces, or configuration.
+
+`ConversationService` stores recent user messages and final answers in memory by conversation ID. Specialist prompts, delegations, retrieved chunks, and runtime observations are not persisted in conversation history.
 
 ## LLM calls per request
 
