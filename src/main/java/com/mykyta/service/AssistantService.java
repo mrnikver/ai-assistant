@@ -1,22 +1,26 @@
 package com.mykyta.service;
 
-import com.mykyta.client.LLMClient;
 import com.mykyta.config.AssistantProperties;
 import com.mykyta.entity.Memory;
+import com.mykyta.model.AgentResult;
 import com.mykyta.model.LLMMessage;
-import com.mykyta.rag.KnowledgeRetriever;
 import com.mykyta.response.AssistantResponse;
 import com.mykyta.response.MemoryExtractionResponse;
-import com.mykyta.tool.ToolDispatcher;
-import com.mykyta.util.JsonResourceLoader;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
+/**
+ * Prepares application context around the agent and persists completed conversations.
+ *
+ * <p>This service owns memory extraction, persistent-memory context, and chat
+ * history. It intentionally does not perform RAG retrieval: project knowledge is
+ * now available only through an agent tool, allowing the LLM to decide when the
+ * additional external lookup is useful.</p>
+ */
 @Service
 @Slf4j
 public class AssistantService {
@@ -24,38 +28,53 @@ public class AssistantService {
     private static final String SYSTEM_PROMPT = """
             You are a deployment investigation assistant.
             Help software engineers investigate deployment failures.
+            Decide whether registered tools are needed before answering.
+            Use knowledge-base search for internal documentation, runbooks,
+            troubleshooting procedures, or other project-specific facts.
             Keep answers concise and technical.
+            When answering, return JSON with exactly two fields:
+            "answer" (a string) and "confidence" (LOW, MEDIUM, or HIGH).
             """;
 
 
-    private final LLMClient llmClient;
     private final ConversationService conversationService;
-    private final JsonResourceLoader jsonResourceLoader;
     private final AgentService agentService;
     private final AssistantProperties assistantProperties;
-    private final KnowledgeRetriever knowledgeRetriever;
     private final MemoryService memoryService;
     private final MemoryExtractorService memoryExtractorService;
 
 
+    /**
+     * Creates the request-level coordinator and its application context collaborators.
+     *
+     * @param conversationService recent conversation storage
+     * @param agentService bounded tool-calling agent
+     * @param assistantProperties conversation-context limits
+     * @param memoryService persistent structured memory
+     * @param memoryExtractorService model-based durable-memory extractor
+     */
     public AssistantService(
-            LLMClient llmClient,
             ConversationService conversationService,
-            JsonResourceLoader jsonResourceLoader,
             AgentService agentService,
             AssistantProperties assistantProperties,
-            KnowledgeRetriever knowledgeRetriever, MemoryService memoryService, MemoryExtractorService memoryExtractorService
+            MemoryService memoryService,
+            MemoryExtractorService memoryExtractorService
     ) {
-        this.llmClient = llmClient;
         this.conversationService = conversationService;
-        this.jsonResourceLoader = jsonResourceLoader;
         this.agentService = agentService;
         this.assistantProperties = assistantProperties;
-        this.knowledgeRetriever = knowledgeRetriever;
         this.memoryService = memoryService;
         this.memoryExtractorService = memoryExtractorService;
     }
 
+    /**
+     * Handles one user turn and returns the answer produced by the agent loop.
+     *
+     * @param conversationId stable identifier used to load and store recent messages
+     * @param userMessage current user request
+     * @return final structured assistant response
+     * @throws Exception if memory extraction, LLM communication, or agent execution fails
+     */
     public AssistantResponse chat(
             String conversationId,
             String userMessage
@@ -108,29 +127,6 @@ public class AssistantService {
             );
         }
 
-        String retrievedKnowledge = knowledgeRetriever.retrieve(
-                        userMessage
-                );
-        log.debug("Adding retrieved knowledge to context: characterCount={}", retrievedKnowledge.length());
-
-        context.add(
-                new LLMMessage(
-                        "system",
-                        """
-                        Relevant deployment documentation retrieved for this request:
-        
-                        --- BEGIN DOCUMENTATION ---
-                        %s
-                        --- END DOCUMENTATION ---
-        
-                        Use the retrieved documentation as the primary source of truth.
-                        Do not invent additional troubleshooting steps that are not supported
-                        by the retrieved documentation.
-                        If the documentation is insufficient, say so explicitly.
-                        """.formatted(retrievedKnowledge)
-                )
-        );
-
         context.addAll(
                 conversationService.getRecentMessages(
                         conversationId,
@@ -147,32 +143,14 @@ public class AssistantService {
 
         context.add(currentUserMessage);
 
-        Map<String, Object> deploymentStatusTool =
-                jsonResourceLoader.load(
-                        "tools/get-deployment-status.json"
-                );
-
-        Map<String, Object> deploymentLogsTool =
-                jsonResourceLoader.load(
-                        "tools/get-deployment-logs.json"
-                );
-
-        List<Map<String, Object>> tools =
-                List.of(
-                        deploymentStatusTool,
-                        deploymentLogsTool
-                );
-        log.debug("Tool definitions loaded: count={}", tools.size());
-
-        // Agent performs zero or more tool interactions.
-        agentService.run(
-                context,
-                tools
+        AgentResult agentResult = agentService.run(context);
+        AssistantResponse answer = agentResult.response();
+        log.debug(
+                "Agent stage completed: iterations={}, toolExecutions={}, contextMessageCount={}",
+                agentResult.iterations(),
+                agentResult.toolExecutions(),
+                context.size()
         );
-        log.debug("Tool-calling stage completed: contextMessageCount={}", context.size());
-
-        log.debug("Starting final structured response generation");
-        AssistantResponse answer = llmClient.chat(context);
 
         conversationService.add(
                 conversationId,

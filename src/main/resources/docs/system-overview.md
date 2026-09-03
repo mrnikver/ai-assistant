@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This application is a deployment investigation assistant. It combines a local language model, persistent memory, retrieval-augmented generation (RAG), and deployment tools to produce concise, structured answers.
+This application is a deployment investigation assistant. It combines a local language model, persistent memory, retrieval-augmented generation (RAG), and an application-controlled tool loop to produce concise, structured answers.
 
 ## Request flow
 
@@ -14,20 +14,18 @@ User request
     +--> Extract durable memory with the LLM
     |       +--> Save accepted memory in PostgreSQL
     |
-    +--> Assemble the LLM context
+    +--> Assemble the agent context
     |       +--> Assistant system prompt
     |       +--> Persistent memories
-    |       +--> RAG-retrieved runbook content
     |       +--> Recent conversation messages
     |       +--> Current user message
     |
     +--> Run the bounded tool-calling loop
-    |       +--> Ask the LLM whether a tool is needed
-    |       +--> Execute requested tools
-    |       +--> Append tool results to the context
-    |       +--> Repeat up to agent.max-iterations
-    |
-    +--> Generate a structured final response
+    |       +--> LLM answers or requests a registered tool
+    |       +--> ToolRegistry validates and executes requested tools
+    |       +--> Tool results become observations in the context
+    |       +--> LLM receives observations and decides again
+    |       +--> Repeat until an answer or agent.max-iterations
     |
     +--> Store the user message and final answer in conversation history
     |
@@ -36,16 +34,15 @@ User request
 
 ## Context assembly
 
-The assistant uses a mutable list of `LLMMessage` objects as the context shared by the tool loop and final-answer generation. Messages are added in a deliberate order:
+The assistant uses a mutable list of `LLMMessage` objects as the context shared by the agent loop. Messages are added in a deliberate order:
 
 1. The main system prompt defines the assistant's role and response style.
 2. Persistent memory supplies durable application facts.
-3. Retrieved documentation supplies relevant deployment instructions.
-4. Recent conversation history supplies short-term context.
-5. The current user message defines the immediate request.
-6. Tool-call messages and tool results are appended by the agent when needed.
+3. Recent conversation history supplies short-term context.
+4. The current user message defines the immediate request.
+5. Tool-call messages and tool observations are appended by the agent when needed.
 
-The final LLM call receives this complete context and must return JSON matching `schemas/assistant-response.json`.
+Every agent turn receives this context and the registered tool definitions. The system prompt asks a no-tool response to use the same answer/confidence JSON shape as `schemas/assistant-response.json`; it becomes the result immediately. If a local model returns plain text despite that instruction, the client preserves it as a medium-confidence answer instead of failing the request.
 
 ## Persistent memory
 
@@ -62,25 +59,24 @@ The memory API also exposes:
 
 At application startup, `RunbookIndexer` loads `knowledge/deployment-runbook.txt`, splits it into chunks, and creates an embedding for the first chunk. The backend uses the resulting vector size to create the configured Qdrant collection with cosine distance when it does not already exist. It then creates the remaining embeddings and upserts all chunks into Qdrant.
 
-For each chat request, `RunbookRetriever`:
+When the LLM requests `search_knowledge_base`, `KnowledgeBaseSearchTool` delegates to `RunbookRetriever`, which:
 
-1. Creates an embedding from the current user message.
+1. Creates an embedding from the focused query selected by the LLM.
 2. Searches the configured Qdrant collection.
-3. Selects the highest-scoring result.
-4. Adds its text to the LLM context as deployment documentation.
+3. Returns up to the requested `topK` results.
+4. Lets the tool format those chunks as an observation for the next LLM turn.
 
-Retrieval currently uses one result and does not enforce a minimum similarity score.
+Retrieval no longer runs automatically. The tool defaults to three results, accepts between one and ten, and does not currently enforce a minimum similarity score.
 
 ## Tool-calling loop
 
-`AgentService` sends the assembled context and tool definitions to the LLM. When the model requests tools, the service appends the assistant tool-call message, dispatches each call through `ToolDispatcher`, and appends every result as a tool message.
+`AgentService` sends the assembled context and definitions from `ToolRegistry` to the LLM. When the model requests tools, the service appends the assistant tool-call message, asks the registry to validate and execute each call, and appends every result as a tool observation.
 
-The updated context is sent back to the LLM until it stops requesting tools or reaches `agent.max-iterations`. The current tools are:
+The updated context is sent back to the LLM until it returns a structured answer or reaches `agent.max-iterations`. The current tool is:
 
-- `getDeploymentStatus`
-- `getDeploymentLogs`
+- `search_knowledge_base(query, topK?)`
 
-`DeploymentTool` currently provides local example results. It can later be replaced with integrations that query real deployment systems without changing the orchestration flow.
+`ToolRegistry` is an allow-list: a model-generated name cannot invoke an arbitrary Java method. Unknown tools, invalid arguments, and operational tool failures become controlled observations so the model can recover on a later turn. Add another capability by implementing `Tool`, exposing it as a Spring bean, and supplying an Ollama-compatible definition; Spring injects it into the registry without changing the loop.
 
 ## Conversation history
 
@@ -101,15 +97,12 @@ Their endpoints, models, and connection settings are defined in `application.yml
 
 ## LLM calls per request
 
-A chat request makes at least three language-model calls:
+A chat request makes at least two language-model calls:
 
 1. Structured memory extraction.
-2. Tool selection.
-3. Structured final-answer generation.
+2. An agent decision that either requests a tool or returns the structured final answer.
 
 Every additional tool-loop iteration adds another call. Embedding and Qdrant requests used for RAG are separate from these language-model calls.
-
-If the tool-selection call returns no tool calls, its textual response is not used directly; the final structured-answer call still generates the response returned to the client.
 
 ## Package responsibilities
 
@@ -126,7 +119,7 @@ If the tool-selection call returns no tool calls, its textual response is not us
 | `request` | Incoming API payloads and validation |
 | `response` | API and structured LLM responses |
 | `service` | Application orchestration, memory, conversations, and agent behavior |
-| `tool` | Tool dispatch and tool implementations |
+| `tool` | Registered tool contracts, allow-list execution, validation, and implementations |
 | `util` | Shared resource-loading utilities |
 
 ## Important configuration
@@ -140,8 +133,16 @@ If the tool-selection call returns no tool calls, its textual response is not us
 | `qdrant.base-url` | Qdrant endpoint |
 | `qdrant.collection` | Collection containing runbook vectors |
 | `assistant.history-limit` | Maximum recent conversation messages added to context |
-| `agent.max-iterations` | Maximum number of tool-selection iterations |
+| `agent.max-iterations` | Maximum LLM decision/tool iterations per request; defaults to 5 and must be at least 1 |
 | `spring.datasource.*` | PostgreSQL connection settings |
+
+## Ollama and qwen3 limitations
+
+- Tool selection is probabilistic. A small local model may skip a useful search, choose a weak query, or request unnecessary retrieval even with a clear tool description.
+- Tool-enabled calls do not also set Ollama's structured-output `format`. Some Ollama/model combinations fail to emit tool calls when tools and a response format are constrained together, so the system prompt requests final JSON and the client provides a plain-text fallback.
+- The application validates names and arguments, but it cannot guarantee that qwen3 will repair a controlled tool error on its next turn.
+- Large `topK` results consume model context. The tool caps `topK` at 10; deployments should still configure a sufficient Ollama context window for multi-step runs.
+- Tool-calling quality depends on the installed qwen3 build and Ollama version. Keep the local model current and verify the model advertises tool support when upgrading.
 
 ## Request-flow logging
 
