@@ -38,6 +38,16 @@ The Supervisor receives assistant system context, persistent memory, short-term 
 
 `AgentRuntime` implements the reusable bounded LLM/tool loop. An `AgentDefinition` supplies the agent name, type, system prompt, explicit concrete tool list, iteration limit, and delegating parent. For every model decision the runtime exposes definitions for only that list, validates calls through a request-scoped `ToolRegistry`, appends observations, and stops at the configured limit.
 
+The LLM execution path is shared rather than implemented separately in each agent class:
+
+```text
+SupervisorAgent --+
+KnowledgeAgent  ---+--> AgentRuntime --> LLMClient --> Ollama
+RuntimeAgent    ---+
+```
+
+The agent classes define their role, prompt, tool access, and iteration limit. `AgentRuntime` executes each agent's bounded LLM/tool loop, and `LLMClient` performs the actual Ollama request. Consequently, an agent can be architecturally LLM-driven even when its Java class does not directly depend on or invoke `LLMClient`. For example, the Supervisor's model decisions and post-delegation synthesis follow `SupervisorAgent -> AgentRuntime -> LLMClient -> Ollama`; traces label those calls `AGENT_DECISION` and `SUPERVISOR_SYNTHESIS` as appropriate.
+
 The hierarchy is fixed and non-recursive:
 
 - `SupervisorAgent` may invoke `ask_knowledge_agent` and `ask_runtime_agent` only. It cannot directly execute RAG or runtime tools.
@@ -68,6 +78,10 @@ Startup collection handling is controlled by `rag.reset-on-startup`. The default
 `search_knowledge_base(query, topK?, sourceTypes?)` remains retrieval-only. It embeds the focused query and applies a Qdrant payload filter before similarity results are returned. `topK` defaults to 3 and is limited to 1–10. `sourceTypes` is optional and defaults to every knowledge category except `MOCK_RUNTIME`; callers can select `RUNBOOK` for procedures or `SOURCE_CODE`/`DOCUMENTATION` for implementation questions. `MOCK_RUNTIME` is rejected even when explicitly requested, so hardcoded mock state such as `MockDeploymentService` cannot become Knowledge Agent evidence. Results include source type, path, heading or symbol, line range, and relevance score.
 
 Retrieval is never available to the Runtime Agent and never runs automatically outside a Knowledge Agent decision. The Knowledge Agent is instructed to distinguish implementation facts, recommended procedures, and unverified assumptions, and never present source constants, examples, tests, or mocks as current observations.
+
+For implementation questions, retrieval is evidence-driven and may be multi-hop within `agent.knowledge-max-iterations`. The first search should use concrete symbols and call relationships rather than only the user's phrasing. If a retrieved class delegates behavior to another component, the Knowledge Agent searches again for that component and the missing edge before synthesizing an answer. Retrieving one relevant file does not justify HIGH confidence unless it establishes the complete claim. Direct code relationships and architectural behavior must be stated separately; for example, “`SupervisorAgent` does not directly invoke `LLMClient`” does not mean “the Supervisor does not use an LLM.” If the complete path cannot be verified within the bounded loop, the answer identifies the missing link and uses MEDIUM or LOW confidence.
+
+Acceptance scenario: for “Does our SupervisorAgent talk to the LLM?”, project evidence should establish `SupervisorAgent -> AgentRuntime -> LLMClient -> Ollama`. The grounded answer is that the Supervisor is architecturally LLM-driven through the shared runtime, even though `SupervisorAgent` does not itself call `LLMClient`. A typical trace includes Supervisor delegation to Knowledge Agent, one or more project-knowledge searches (including shared runtime/client lookup when needed), and Supervisor synthesis.
 
 ## Runtime Agent and restored mocked tools
 
