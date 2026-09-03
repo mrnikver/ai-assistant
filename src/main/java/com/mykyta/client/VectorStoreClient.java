@@ -6,6 +6,7 @@ import com.mykyta.config.QdrantProperties;
 import com.mykyta.model.QdrantPoint;
 import com.mykyta.model.QdrantSearchResult;
 import com.mykyta.model.QdrantUpsertRequest;
+import com.mykyta.model.KnowledgeChunk;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import com.mykyta.trace.AgentTracer;
@@ -202,6 +203,48 @@ public class VectorStoreClient {
         );
     }
 
+    /** Stores a project chunk with a stable source-based point id and rich payload metadata. */
+    public void upsert(KnowledgeChunk chunk, double[] vector, String indexRunId)
+            throws IOException, InterruptedException {
+        String identity = chunk.project() + ":" + chunk.sourcePath() + ":" + chunk.chunkIndex();
+        upsertPoint(new QdrantPoint(
+                UUID.nameUUIDFromBytes(identity.getBytes(StandardCharsets.UTF_8)).toString(),
+                vector,
+                chunk.payload(indexRunId)
+        ));
+    }
+
+    /** Removes project points left by older successful index runs without touching runbook data. */
+    public void deleteProjectChunksExcept(String indexRunId) throws IOException, InterruptedException {
+        Map<String, Object> filter = Map.of(
+                "must", List.of(Map.of("key", "source_type", "match", Map.of("value", "project"))),
+                "must_not", List.of(Map.of("key", "index_run_id", "match", Map.of("value", indexRunId)))
+        );
+        Map<String, Object> body = Map.of("filter", filter);
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(properties.baseUrl() + "/collections/" + properties.collection() + "/points/delete?wait=true"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) {
+            throw new RuntimeException("Qdrant stale project chunk deletion failed: " + response.statusCode() + " " + response.body());
+        }
+    }
+
+    private void upsertPoint(QdrantPoint point) throws IOException, InterruptedException {
+        QdrantUpsertRequest body = new QdrantUpsertRequest(List.of(point));
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(properties.baseUrl() + "/collections/" + properties.collection() + "/points?wait=true"))
+                .header("Content-Type", "application/json")
+                .PUT(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) {
+            throw new RuntimeException("Qdrant upsert failed: " + response.statusCode() + " " + response.body());
+        }
+    }
+
     /**
      * Finds nearest chunks and records count, scores, and duration under an active knowledge search.
      * @param queryVector query embedding; vector values are never traced
@@ -295,15 +338,15 @@ public class VectorStoreClient {
 
         for (JsonNode point : points) {
 
-            results.add(
-                    new QdrantSearchResult(
-                            point.path("payload")
-                                    .path("text")
-                                    .asText(),
-                            point.path("score")
-                                    .asDouble()
-                    )
-            );
+            JsonNode payload = point.path("payload");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> metadata = objectMapper.convertValue(payload, Map.class);
+            metadata.remove("text");
+            results.add(new QdrantSearchResult(
+                    payload.path("text").asText(),
+                    point.path("score").asDouble(),
+                    metadata
+            ));
         }
 
         log.debug(
