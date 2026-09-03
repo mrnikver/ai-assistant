@@ -2,6 +2,7 @@ package com.mykyta.service;
 
 import com.mykyta.client.LLMClient;
 import com.mykyta.model.LLMMessage;
+import com.mykyta.observability.LlmCallContext;
 import com.mykyta.response.MemoryExtractionResponse;
 import com.mykyta.util.JsonResourceLoader;
 import lombok.extern.slf4j.Slf4j;
@@ -74,7 +75,8 @@ public class MemoryExtractorService {
         MemoryExtractionResponse response = llmClient.structuredChat(
                 messages,
                 schema,
-                MemoryExtractionResponse.class
+                MemoryExtractionResponse.class,
+                LlmCallContext.memoryExtraction(userMessage)
         );
 
         log.debug(

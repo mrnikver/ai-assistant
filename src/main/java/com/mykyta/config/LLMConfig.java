@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mykyta.client.LLMClient;
 import com.mykyta.util.JsonResourceLoader;
 import com.mykyta.trace.AgentTracer;
+import com.mykyta.observability.LlmObservabilitySummarizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -27,7 +28,8 @@ public class LLMConfig {
     public LLMClient llmClient(LLMProperties properties,
                                ObjectMapper objectMapper,
                                JsonResourceLoader jsonResourceLoader,
-                               AgentTracer agentTracer) throws IOException {
+                               AgentTracer agentTracer,
+                               LlmObservabilitySummarizer observabilitySummarizer) throws IOException {
         Map<String, Object> schema = jsonResourceLoader.load("schemas/assistant-response.json");
 
         return new LLMClient(
@@ -35,7 +37,8 @@ public class LLMConfig {
                 properties.model(),
                 objectMapper,
                 schema,
-                agentTracer
+                agentTracer,
+                observabilitySummarizer
         );
     }
 }

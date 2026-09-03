@@ -6,10 +6,13 @@ assistant:
   history-limit: 10
 
 agent:
-  max-iterations: 5
+  supervisor-max-iterations: 4
+  knowledge-max-iterations: 3
+  runtime-max-iterations: 3
 
 trace:
   max-entries: 500
+  llm-preview-max-chars: 500
 
 embedding:
   base-url: http://192.168.0.112:11434

@@ -2,6 +2,7 @@ package com.mykyta.service;
 
 import com.mykyta.config.AssistantProperties;
 import com.mykyta.entity.Memory;
+import com.mykyta.agent.SupervisorAgent;
 import com.mykyta.model.AgentResult;
 import com.mykyta.model.AssistantExecution;
 import com.mykyta.model.LLMMessage;
@@ -23,28 +24,15 @@ import java.util.stream.Collectors;
  * Prepares application context around the agent and persists completed conversations.
  *
  * <p>This service owns memory extraction, persistent-memory context, and chat
- * history. It intentionally does not perform RAG retrieval: project knowledge is
- * now available only through an agent tool, allowing the LLM to decide when the
- * additional external lookup is useful.</p>
+ * history. Domain investigation is delegated through the Supervisor, so this
+ * coordinator never performs RAG or runtime lookup directly.</p>
  */
 @Service
 @Slf4j
 public class AssistantService {
 
-    private static final String SYSTEM_PROMPT = """
-            You are a deployment investigation assistant.
-            Help software engineers investigate deployment failures.
-            Decide whether registered tools are needed before answering.
-            Use knowledge-base search for internal documentation, runbooks,
-            troubleshooting procedures, or other project-specific facts.
-            Keep answers concise and technical.
-            When answering, return JSON with exactly two fields:
-            "answer" (a string) and "confidence" (LOW, MEDIUM, or HIGH).
-            """;
-
-
     private final ConversationService conversationService;
-    private final AgentService agentService;
+    private final SupervisorAgent supervisorAgent;
     private final AssistantProperties assistantProperties;
     private final MemoryService memoryService;
     private final MemoryExtractorService memoryExtractorService;
@@ -56,7 +44,7 @@ public class AssistantService {
      * Creates the request-level coordinator and its application context collaborators.
      *
      * @param conversationService recent conversation storage
-     * @param agentService bounded tool-calling agent
+     * @param supervisorAgent top-level agent that delegates domain investigation
      * @param assistantProperties conversation-context limits
      * @param memoryService persistent structured memory
      * @param memoryExtractorService model-based durable-memory extractor
@@ -65,7 +53,7 @@ public class AssistantService {
      */
     public AssistantService(
             ConversationService conversationService,
-            AgentService agentService,
+            SupervisorAgent supervisorAgent,
             AssistantProperties assistantProperties,
             MemoryService memoryService,
             MemoryExtractorService memoryExtractorService,
@@ -73,7 +61,7 @@ public class AssistantService {
             TraceService traceService
     ) {
         this.conversationService = conversationService;
-        this.agentService = agentService;
+        this.supervisorAgent = supervisorAgent;
         this.assistantProperties = assistantProperties;
         this.memoryService = memoryService;
         this.memoryExtractorService = memoryExtractorService;
@@ -130,13 +118,6 @@ public class AssistantService {
             log.debug("No durable memory detected");
         }
 
-        context.add(
-                new LLMMessage(
-                        "system",
-                        SYSTEM_PROMPT
-                )
-        );
-
         List<Memory> memories = memoryService.getAll();
         log.debug("Adding persistent memory to context: count={}", memories.size());
 
@@ -160,19 +141,16 @@ public class AssistantService {
             );
         }
 
-        context.addAll(
-                conversationService.getRecentMessages(
-                        conversationId,
-                        assistantProperties.historyLimit()
-                )
-        );
+        List<LLMMessage> recentMessages = conversationService.getRecentMessages(
+                conversationId, assistantProperties.historyLimit());
+        context.addAll(recentMessages);
         log.debug("Recent conversation history added: contextMessageCount={}", context.size());
 
         LLMMessage currentUserMessage = new LLMMessage("user", userMessage);
 
         context.add(currentUserMessage);
 
-        AgentResult agentResult = agentService.run(context);
+        AgentResult agentResult = supervisorAgent.run(context, recentMessages.size(), memories.size(), userMessage);
         AssistantResponse answer = agentResult.response();
 
         log.debug(

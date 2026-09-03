@@ -3,6 +3,8 @@ package com.mykyta.trace;
 /** Identifies an observable operation in an agent execution without exposing model reasoning. */
 public enum TraceSpanType {
     /** Complete assistant request. */ AGENT_RUN,
+    /** Top-level delegation and synthesis agent. */ SUPERVISOR,
+    /** Independent specialized agent execution. */ AGENT,
     /** One bounded decision cycle. */ AGENT_ITERATION,
     /** Ollama model invocation. */ LLM_CALL,
     /** Registry-controlled application action. */ TOOL_CALL,

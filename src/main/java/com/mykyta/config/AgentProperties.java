@@ -6,22 +6,21 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 /**
  * Configures safety limits for the explicit agent loop.
  *
- * @param maxIterations maximum LLM reasoning/tool-execution iterations for one
- *                      user request; defaults to {@code 5} and must be positive
+ * @param supervisorMaxIterations maximum Supervisor decisions/delegations
+ * @param knowledgeMaxIterations maximum Knowledge Agent decisions
+ * @param runtimeMaxIterations maximum Runtime Agent decisions
  */
 @ConfigurationProperties(prefix = "agent")
 public record AgentProperties(
-        @DefaultValue("5") int maxIterations
+        @DefaultValue("4") int supervisorMaxIterations,
+        @DefaultValue("3") int knowledgeMaxIterations,
+        @DefaultValue("3") int runtimeMaxIterations
 ) {
 
-    /**
-     * Rejects invalid limits early because zero would prevent any model decision.
-     *
-     * @param maxIterations configured maximum iteration count
-     */
+    /** Rejects invalid limits early because zero would prevent any model decision. */
     public AgentProperties {
-        if (maxIterations < 1) {
-            throw new IllegalArgumentException("agent.max-iterations must be at least 1");
+        if (supervisorMaxIterations < 1 || knowledgeMaxIterations < 1 || runtimeMaxIterations < 1) {
+            throw new IllegalArgumentException("All agent iteration limits must be at least 1");
         }
     }
 }

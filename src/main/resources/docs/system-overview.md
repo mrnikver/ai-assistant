@@ -2,186 +2,152 @@
 
 ## Purpose
 
-This application is a deployment investigation assistant. It combines a local language model, persistent memory, retrieval-augmented generation (RAG), and an application-controlled tool loop to produce concise, structured answers.
-
-## Request flow
-
-`POST /chat` accepts a message and an optional conversation ID. If no ID is supplied, `ChatController` generates a UUID. The request is then processed by `AssistantService` in the following order:
+This deployment investigation assistant combines a local LLM, persistent memory, conversation history, retrieval-augmented generation (RAG), and mocked operational data. A Supervisor owns user interaction and delegates evidence gathering to two independent specialists.
 
 ```text
 User request
-    |
-    +--> Extract durable memory with the LLM
-    |       +--> Save accepted memory in PostgreSQL
-    |
-    +--> Assemble the agent context
-    |       +--> Assistant system prompt
-    |       +--> Persistent memories
-    |       +--> Recent conversation messages
-    |       +--> Current user message
-    |
-    +--> Run the bounded tool-calling loop
-    |       +--> LLM answers or requests a registered tool
-    |       +--> ToolRegistry validates and executes requested tools
-    |       +--> Tool results become observations in the context
-    |       +--> LLM receives observations and decides again
-    |       +--> Repeat until an answer or agent.max-iterations
-    |
-    +--> Store the user message and final answer in conversation history
-    |
-    +--> Complete and retain the execution trace
-    |
-    +--> Return the answer, confidence, conversation ID, message ID, and trace summary
+     |
+     v
+AssistantService
+     +--> memory extraction
+     +--> persistent memory + conversation history
+     |
+     v
+Supervisor Agent
+     +--> Knowledge Agent
+     |       +--> search_knowledge_base
+     |               +--> Embedding
+     |               +--> Qdrant
+     |
+     +--> Runtime Agent
+             +--> getDeploymentStatus
+             +--> getDeploymentLogs
+                     +--> mock deployment data
+     |
+     v
+Supervisor synthesis --> final answer
 ```
 
-## Context assembly
+## Request flow and context assembly
 
-The assistant uses a mutable list of `LLMMessage` objects as the context shared by the agent loop. Messages are added in a deliberate order:
+`POST /chat` accepts a message and optional conversation ID. `AssistantService` starts a trace, extracts supported durable memory, loads PostgreSQL memory, adds recent conversation messages and the current user message, and passes that context to `SupervisorAgent`. The Supervisor decides whether it can answer, needs one specialist, or needs both. Specialist findings return as tool observations; only the Supervisor produces the public `AssistantResponse`. The completed user message and final answer are saved in conversation history and the response includes confidence and a trace summary.
 
-1. The main system prompt defines the assistant's role and response style.
-2. Persistent memory supplies durable application facts.
-3. Recent conversation history supplies short-term context.
-4. The current user message defines the immediate request.
-5. Tool-call messages and tool observations are appended by the agent when needed.
+The Supervisor receives assistant system context, persistent memory, short-term history, and the current request. Specialists receive their own role prompt plus only the focused question delegated by the Supervisor. They do not inherit hidden Supervisor prompts, memory values, or its mutable tool conversation.
 
-Every agent turn receives this context and the registered tool definitions. The system prompt asks a no-tool response to use the same answer/confidence JSON shape as `schemas/assistant-response.json`; it becomes the result immediately. If a local model returns plain text despite that instruction, the client preserves it as a medium-confidence answer instead of failing the request.
+## Agent architecture
 
-## Persistent memory
+`AgentRuntime` implements the reusable bounded LLM/tool loop. An `AgentDefinition` supplies the agent name, type, system prompt, explicit concrete tool list, iteration limit, and delegating parent. For every model decision the runtime exposes definitions for only that list, validates calls through a request-scoped `ToolRegistry`, appends observations, and stops at the configured limit.
 
-Before answering, `MemoryExtractorService` makes a structured LLM call to determine whether the current message contains a durable fact. Examples include a production region, default service, persistent configuration, or long-term preference.
+The hierarchy is fixed and non-recursive:
 
-Accepted memories are stored by `MemoryService` in PostgreSQL. A memory is uniquely identified by its key. Saving an existing key updates its value; saving a new key creates a row. All stored memories are added to every chat request, so memory is currently application-wide rather than scoped to a user or conversation.
+- `SupervisorAgent` may invoke `ask_knowledge_agent` and `ask_runtime_agent` only. It cannot directly execute RAG or runtime tools.
+- `KnowledgeAgent` may invoke `search_knowledge_base` only. It cannot access runtime tools or claim current operational state.
+- `RuntimeAgent` may invoke `getDeploymentStatus` and `getDeploymentLogs` only. It cannot access RAG or treat mock state as documentation.
+- Specialized agents cannot invoke the Supervisor or one another.
 
-The memory API also exposes:
+Only application-controlled `AgentDefinition` and `ToolRegistry` configuration grants capabilities. Model-generated tool names are inert data until Java validates them.
 
-- `POST /memory` to save a supported memory key and value.
-- `GET /memory` to return all stored memories.
+## Supervisor behavior
 
-## Retrieval-augmented generation
+The Supervisor classifies the evidence domains implied by the request. Documentation, architecture, source, and runbook questions go to Knowledge. Current health, deployment status, and operational logs go to Runtime. Combined questions can delegate to both before a final synthesis. Delegations are explicit tool calls, bounded by `agent.supervisor-max-iterations`, and visible in the execution trace.
 
-At application startup, `RunbookIndexer` loads `knowledge/deployment-runbook.txt`, and `ProjectKnowledgeIndexer` recursively scans the configured backend and UI roots for Java, Markdown, TypeScript, and TSX documents. Source files are split on headings and code declarations, with bounded line-based chunks for large sections. Each project chunk carries its project, repository-relative path, language, symbol or heading context, and line range. Both indexers use the configured embedding client and upsert into the same Qdrant collection. Stable source-based point IDs make re-indexing idempotent, and stale project points are removed after a successful scan.
+## Knowledge Agent and RAG
 
-When the LLM requests `search_knowledge_base`, `KnowledgeBaseSearchTool` delegates to `RunbookRetriever`, which:
+At startup, `RunbookIndexer` indexes the bundled deployment runbook and `ProjectKnowledgeIndexer` scans configured backend and UI roots. Java, Markdown, TypeScript, and TSX content is chunked with source metadata, embedded, and upserted into Qdrant with stable IDs.
 
-1. Creates an embedding from the focused query selected by the LLM.
-2. Searches the configured Qdrant collection.
-3. Returns up to the requested `topK` results.
-4. Lets the tool format those chunks as an observation for the next LLM turn.
+`search_knowledge_base(query, topK?)` remains a retrieval-only capability. It embeds the focused query, searches Qdrant, and returns ranked chunks as an observation. `topK` defaults to 3 and is limited to 1–10. Retrieval is never available to the Runtime Agent and never runs automatically outside a Knowledge Agent decision.
 
-Retrieval no longer runs automatically. The tool defaults to three results, accepts between one and ten, and does not currently enforce a minimum similarity score.
+## Runtime Agent and restored mocked tools
 
-## Tool-calling loop
+The runtime capabilities were recovered from Git history predating the RAG refactor. Their names, descriptions, required `serviceName` argument, and deterministic behavior are preserved:
 
-`AgentService` sends the assembled context and definitions from `ToolRegistry` to the LLM. When the model requests tools, the service appends the assistant tool-call message, asks the registry to validate and execute each call, and appends every result as a tool observation.
+| Tool | payments-service | orders-service | unknown service |
+| --- | --- | --- | --- |
+| `getDeploymentStatus` | `FAILED` | `RUNNING` | `UNKNOWN` |
+| `getDeploymentLogs` | `ERROR: Database connection refused` | `Deployment completed successfully` | `No deployment logs found` |
 
-The updated context is sent back to the LLM until it returns a structured answer or reaches `agent.max-iterations`. The current tool is:
+Both tools validate that `serviceName` is a non-blank string. They are intentionally mock operational data, not live infrastructure integrations.
 
-- `search_knowledge_base(query, topK?)`
+## Tool calling and bounded execution
 
-`ToolRegistry` is an allow-list: a model-generated name cannot invoke an arbitrary Java method. Unknown tools, invalid arguments, and operational tool failures become controlled observations so the model can recover on a later turn. Add another capability by implementing `Tool`, exposing it as a Spring bean, and supplying an Ollama-compatible definition; Spring injects it into the registry without changing the loop.
+Each agent loop sends its current context and exact allow-list to Ollama. Requested calls are validated, executed, converted to controlled `ToolResult` observations, and returned to that same agent. Unknown tools, invalid arguments, and operational failures cannot invoke arbitrary Java code. Limits are independent: `agent.supervisor-max-iterations`, `agent.knowledge-max-iterations`, and `agent.runtime-max-iterations`.
 
-## Conversation history
+## Persistent memory and conversation history
 
-`ConversationService` stores conversation messages in an in-memory concurrent map keyed by conversation ID. Only the original user message and final assistant answer are retained. System messages, retrieved documentation, and tool interactions are reconstructed for each request.
-
-The number of recent messages added to a request is controlled by `assistant.history-limit`. Conversation history is lost when the application restarts and is not shared between application instances.
-
-## External services
-
-The application depends on:
-
-- An Ollama-compatible chat API for memory extraction, tool selection, and final response generation.
-- An Ollama-compatible embedding API for indexing and retrieval.
-- Qdrant for vector storage and similarity search.
-- PostgreSQL for persistent application memory.
-
-Their endpoints, models, and connection settings are defined in `application.yml`.
+`MemoryExtractorService` performs a structured LLM call before orchestration. Accepted application-wide facts are upserted in PostgreSQL and supplied only to the Supervisor. `ConversationService` stores recent user messages and final answers in memory by conversation ID. Specialist prompts, delegations, retrieved chunks, and runtime observations are not persisted in conversation history.
 
 ## LLM calls per request
 
-A chat request makes at least two language-model calls:
+Every request uses one memory-extraction LLM call and at least one Supervisor call. Each delegation starts an independent specialist model loop, normally requiring a tool-selection call and a result-interpretation call. The Supervisor then makes another call to synthesize specialist observations. Combined investigations therefore use more calls than single-domain or direct-answer requests. Embedding and Qdrant requests are not chat LLM calls.
 
-1. Structured memory extraction.
-2. An agent decision that either requests a tool or returns the structured final answer.
+## Tracing
 
-Every additional tool-loop iteration adds another call. Embedding and Qdrant requests used for RAG are separate from these language-model calls.
+Tracing records observable behavior only. `traceId`, `spanId`, and `parentSpanId` reconstruct arbitrary nesting such as:
+
+```text
+Agent run
+  +-- memory extraction / lookup
+  +-- Supervisor Agent
+      +-- Supervisor iteration / LLM decision
+      +-- ask_knowledge_agent
+      |   +-- Knowledge Agent
+      |       +-- agent iteration / LLM decision
+      |       +-- search_knowledge_base
+      |           +-- embedding
+      |           +-- vector search
+      +-- ask_runtime_agent
+          +-- Runtime Agent
+              +-- agent iteration / LLM decision
+              +-- mocked runtime tool
+  +-- final response
+```
+
+Agent spans expose safe metadata including agent name/type, delegating parent, allowed tool names, iteration, status, and duration. Every LLM span contains structured `input` and `output` summaries produced by one shared observability summarizer. Input summaries include purpose, agent ownership, message/history/memory counts, tool names, the bounded current request, and bounded tool or agent observations. Output summaries distinguish delegation, tool calls, final responses, structured results, plain-text fallback, and errors; they include sanitized arguments or a bounded answer preview when useful.
+
+Raw system prompts, assembled contexts, complete history, memory values, full retrieved chunks, embeddings, hidden reasoning, credentials, authorization data, and raw external responses remain excluded. A centralized recursive sanitizer redacts secret-like keys (including passwords, tokens, API/access/private keys, credentials, authorization, and cookies), bounds collections and nesting, and truncates text with an explicit `... [truncated]` marker according to `trace.llm-preview-max-chars`. The same structured summaries feed both logs and traces, preventing policy drift.
+
+At `INFO`, backend logs record concise semantic lifecycle events: trace ID, agent, purpose, iteration, counts, output type, selected tools, duration, and error category. At `DEBUG`, logs include the same sanitized bounded input/output structures available in the trace. Request and conversation IDs remain available through the logging context; trace IDs are included directly in LLM event messages. Completed traces are retained in the bounded in-memory `TraceStore` and loaded by `GET /api/traces/{traceId}`.
+
+## UI architecture overview
+
+The React UI includes two related views. “View execution” renders the generic parent-child trace tree at arbitrary depth and visually distinguishes the Supervisor, specialist agents, LLM calls, domain tools, RAG internals, and final response. The interactive architecture dialog shows the Supervisor above sibling Knowledge and Runtime agents, their allowed tools, data dependencies, supporting memory/history, Ollama calls, and trace storage. Clicking any node explains its responsibility and capability boundary; the request-flow walkthrough highlights delegation and data flow.
 
 ## Package responsibilities
 
 | Package | Responsibility |
 | --- | --- |
-| `client` | HTTP clients for the LLM, embedding model, and vector store |
-| `config` | Typed application properties and Spring bean configuration |
-| `controller` | REST endpoints and transport orchestration |
-| `entity` | JPA persistence entities |
-| `exception` | API error responses and exception handling |
-| `model` | Internal LLM, tool-call, and vector-store data structures |
-| `rag` | Runbook indexing, chunking, embedding, and retrieval |
-| `repository` | Spring Data repositories |
-| `request` | Incoming API payloads and validation |
-| `response` | API and structured LLM responses |
-| `service` | Application orchestration, memory, conversations, and agent behavior |
-| `tool` | Registered tool contracts, allow-list execution, validation, and implementations |
-| `util` | Shared resource-loading utilities |
+| `agent` | Agent definitions, types, reusable runtime, Supervisor, and specialists |
+| `client` | Ollama chat, embedding, and vector-store HTTP clients |
+| `config` | Typed configuration and independent agent limits |
+| `controller` | REST validation and transport orchestration |
+| `entity`, `repository` | PostgreSQL persistent memory |
+| `model`, `request`, `response` | Internal and API data contracts |
+| `rag` | Runbook/project indexing, chunking, embedding, and retrieval |
+| `service` | Request coordination, mock deployment data, memory, history, and traces |
+| `tool` | Tool contracts, scoped allow-list validation, RAG, and runtime tools |
+| `trace` | Sanitized hierarchical execution observability |
 
-## Important configuration
+## Configuration
 
 | Property | Purpose |
 | --- | --- |
-| `llm.base-url` | Chat API endpoint |
-| `llm.model` | Model used for chat and structured generation |
-| `embedding.base-url` | Embedding API endpoint |
-| `embedding.model` | Embedding model used by RAG |
-| `qdrant.base-url` | Qdrant endpoint |
-| `qdrant.collection` | Collection containing runbook vectors |
-| `assistant.history-limit` | Maximum recent conversation messages added to context |
-| `agent.max-iterations` | Maximum LLM decision/tool iterations per request; defaults to 5 and must be at least 1 |
-| `trace.max-entries` | Maximum completed traces kept in the local bounded store; defaults to 500 and evicts oldest first |
-| `spring.datasource.*` | PostgreSQL connection settings |
+| `llm.base-url`, `llm.model` | Ollama chat endpoint and model for all agents |
+| `agent.supervisor-max-iterations` | Maximum Supervisor decisions/delegations (default 4) |
+| `agent.knowledge-max-iterations` | Maximum Knowledge Agent decisions (default 3) |
+| `agent.runtime-max-iterations` | Maximum Runtime Agent decisions (default 3) |
+| `assistant.history-limit` | Recent conversation messages supplied to the Supervisor |
+| `embedding.*`, `qdrant.*` | RAG embedding and vector-search configuration |
+| `project-knowledge.*` | Project indexing roots and chunk size |
+| `spring.datasource.*` | PostgreSQL persistent-memory connection |
+| `trace.max-entries` | Maximum retained in-memory traces |
+| `trace.llm-preview-max-chars` | Maximum characters in any sanitized LLM text preview (default 500) |
 
-## Ollama and qwen3 limitations
+## Known limitations
 
-- Tool selection is probabilistic. A small local model may skip a useful search, choose a weak query, or request unnecessary retrieval even with a clear tool description.
-- Tool-enabled calls do not also set Ollama's structured-output `format`. Some Ollama/model combinations fail to emit tool calls when tools and a response format are constrained together, so the system prompt requests final JSON and the client provides a plain-text fallback.
-- The application validates names and arguments, but it cannot guarantee that qwen3 will repair a controlled tool error on its next turn.
-- Large `topK` results consume model context. The tool caps `topK` at 10; deployments should still configure a sufficient Ollama context window for multi-step runs.
-- Tool-calling quality depends on the installed qwen3 build and Ollama version. Keep the local model current and verify the model advertises tool support when upgrading.
-
-## Request-flow logging
-
-Every HTTP request receives an `X-Request-ID`. The backend accepts an existing value from the request header or generates a UUID, returns it in the response header, and includes it in every log entry produced on the request thread. Chat requests also include their conversation ID in the logging context.
-
-At `INFO` level, logs describe the major lifecycle events: HTTP request boundaries, assistant stages, memory persistence, retrieval results, agent iterations, tool executions, and final response confidence. At `DEBUG` level, logs add message counts, input lengths, vector dimensions, resource loading, and external-client timings.
-
-Prompt text, memory values, embedding vectors, credentials, and full external responses are deliberately excluded. Use `requestId` to trace one HTTP request and `conversationId` to find requests belonging to the same conversation. Logging levels and the console pattern are configured under `logging` in `application.yml`.
-
-## Agent execution traces
-
-Each chat request creates an application-owned execution trace. The trace explains observable system behavior without recording hidden chain of thought. It contains timings, statuses, model and tool names, bounded tool arguments, retrieval counts, memory lookup counts, and controlled error categories. It deliberately excludes prompts, assembled model context, retrieved chunk contents, memory values, credentials, raw external responses, and private reasoning.
-
-The hierarchy is represented by globally unique `traceId` and `spanId` values plus each span's `parentSpanId`:
-
-```text
-Agent run
-    +--> Structured memory-extraction LLM call
-    +--> Memory lookup
-    +--> Agent iteration 1
-    |       +--> Agent LLM decision
-    |       +--> Tool call
-    |               +--> Knowledge-base search
-    |                       +--> Embedding generation
-    |                       +--> Qdrant vector search
-    +--> Agent iteration 2
-    |       +--> Agent LLM decision
-    +--> Final response
-```
-
-The parent relationship represents causality, not merely clock order. For example, embedding and vector-search spans are children of the knowledge search that required them, which is a child of the validated tool call selected in an agent iteration. The UI can reconstruct arbitrary nesting from these identifiers without hard-coding a fixed tree depth.
-
-`AssistantService` starts and completes the root trace. `AgentService` records iterations, `LLMClient` records every Ollama chat call, `ToolRegistry` records allowed and rejected tool requests, `KnowledgeBaseSearchTool` records retrieval intent and counts, the embedding and vector clients record external retrieval stages, and `MemoryService` records actual persistent-memory reads. Summary counts are derived from the recorded span types rather than maintained as separate mutable counters.
-
-`POST /chat` returns the summary with the assistant message, including the `traceId`, total duration, operation counts, and status. It does not return detailed spans. `GET /api/traces/{traceId}` returns an API DTO containing the full flat span set only when the user opens “View execution.” The generated `messageId` lets the frontend keep the summary associated with the exact assistant message that produced it.
-
-`TraceStore` separates trace capture from retention. The current `InMemoryTraceStore` keeps at most `trace.max-entries` completed traces and evicts the oldest trace when that bound is exceeded. Traces are therefore lost on restart, are not shared across application instances, and may return HTTP 404 after eviction. A production deployment can replace this implementation with durable storage without changing agent execution or the public trace contract.
-
-The internal trace model intentionally resembles OpenTelemetry spans—IDs, parent relationships, timestamps, duration, status, type, name, and attributes—without adding an OpenTelemetry dependency. A future exporter can map completed `AgentTrace` and `TraceSpan` records to an OpenTelemetry SDK or collector while retaining the current sanitization boundary and API DTOs.
+- Routing and tool selection are probabilistic and depend on the configured local model.
+- Tool-enabled Ollama calls omit structured `format`; malformed final JSON falls back to medium-confidence plain text.
+- Runtime results are deterministic mocks, not live service health.
+- Persistent memory is application-wide rather than user-scoped.
+- Conversation history and traces are in memory and disappear on restart; traces may also be evicted.
+- RAG has no minimum similarity threshold, and large retrievals consume model context.
+- Specialist execution is sequential when a Supervisor response requests both delegations.

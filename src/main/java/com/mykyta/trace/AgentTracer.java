@@ -69,6 +69,12 @@ public class AgentTracer {
         return context == null ? 0 : ++context.llmCalls;
     }
 
+    /** Returns the active request trace identifier for log correlation. */
+    public String currentTraceId() {
+        TraceContext context = current.get();
+        return context == null ? null : context.traceId;
+    }
+
     private void detach(TraceContext context) {
         if (current.get() == context) current.remove();
     }

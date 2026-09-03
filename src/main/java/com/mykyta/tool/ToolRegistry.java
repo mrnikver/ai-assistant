@@ -3,11 +3,10 @@ package com.mykyta.tool;
 import com.mykyta.model.ToolCall;
 import com.mykyta.model.ToolResult;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
 import com.mykyta.trace.AgentTracer;
 import com.mykyta.trace.TraceScope;
 import com.mykyta.trace.TraceSpanType;
-import com.mykyta.trace.TraceSanitizer;
+import com.mykyta.observability.LlmObservabilitySanitizer;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -30,22 +29,24 @@ import java.util.stream.Collectors;
  * validates it; the registered tool executes; its result becomes an observation;
  * and the LLM receives that observation on the next agent iteration.</p>
  */
-@Component
 @Slf4j
 public class ToolRegistry {
 
     private final Map<String, Tool> tools;
     private final AgentTracer agentTracer;
+    private final LlmObservabilitySanitizer sanitizer;
 
     /**
-     * Builds a registry from Spring-managed tools and rejects duplicate names at startup.
+     * Builds an agent-scoped registry from its explicit tools and rejects duplicate names.
      *
      * @param registeredTools explicitly registered application tools
      * @param agentTracer collector used to record allowed and rejected tool requests
      * @throws IllegalStateException if two tools expose the same name
      */
-    public ToolRegistry(List<Tool> registeredTools, AgentTracer agentTracer) {
+    public ToolRegistry(List<Tool> registeredTools, AgentTracer agentTracer,
+                        LlmObservabilitySanitizer sanitizer) {
         this.agentTracer = agentTracer;
+        this.sanitizer = sanitizer;
         this.tools = Collections.unmodifiableMap(registeredTools.stream().collect(Collectors.toMap(
                 Tool::name,
                 Function.identity(),
@@ -106,7 +107,7 @@ public class ToolRegistry {
                 ? Map.of()
                 : toolCall.function().arguments();
         span.metadata("argumentNames", arguments.keySet().stream().sorted().toList());
-        span.metadata("arguments", TraceSanitizer.arguments(arguments));
+        span.metadata("arguments", sanitizer.map(arguments));
 
         try {
             return ToolResult.success(toolName, tool.execute(arguments));
