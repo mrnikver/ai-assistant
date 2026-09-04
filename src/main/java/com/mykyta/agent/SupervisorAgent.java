@@ -59,6 +59,7 @@ public class SupervisorAgent {
 
     private final AgentRuntime runtime;
     private final AgentDefinition definition;
+    private final AgentDefinition confirmedActionDefinition;
 
     public SupervisorAgent(AgentRuntime runtime, KnowledgeAgent knowledgeAgent,
                            RuntimeAgent runtimeAgent, AgentProperties properties) {
@@ -75,6 +76,10 @@ public class SupervisorAgent {
                                 "Ask the runtime specialist to investigate current mocked deployment state or logs.",
                                 runtimeAgent::investigate)
                 ), properties.supervisorMaxIterations(), null);
+        this.confirmedActionDefinition = new AgentDefinition("Supervisor Agent", AgentType.SUPERVISOR,
+                PROMPT + "\nThe application has already resolved and executed the confirmed action. "
+                        + "Use the supplied application result to answer directly; no tools are available or needed.",
+                List.of(), properties.supervisorMaxIterations(), null);
     }
 
     public AgentResult run(List<LLMMessage> context, int historyMessageCount, int memoryCount, String userRequest)
@@ -86,6 +91,14 @@ public class SupervisorAgent {
                            ToolExecutionContext executionContext)
             throws IOException, InterruptedException {
         return runtime.run(definition, context, historyMessageCount, memoryCount, userRequest, executionContext);
+    }
+
+    /** Produces the final user-facing explanation after application-controlled pending-action resolution. */
+    public AgentResult respondToConfirmedAction(List<LLMMessage> context, int historyMessageCount,
+                                                int memoryCount, String userRequest)
+            throws IOException, InterruptedException {
+        return runtime.run(confirmedActionDefinition, context, historyMessageCount, memoryCount, userRequest,
+                ToolExecutionContext.NONE);
     }
 
     @FunctionalInterface

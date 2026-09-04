@@ -1,7 +1,8 @@
 package com.mykyta.tool;
 
 import com.mykyta.service.MockDeploymentService;
-import com.mykyta.service.RestartConfirmationPolicy;
+import com.mykyta.model.PendingAction;
+import com.mykyta.service.PendingActionService;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -15,12 +16,16 @@ public class RestartServiceTool implements Tool {
     private static final Set<String> ARGUMENTS = Set.of("service", "environment");
 
     private final MockDeploymentService deploymentService;
-    private final RestartConfirmationPolicy confirmationPolicy;
+    private static final Map<String, Set<String>> ALLOWED_TARGETS = Map.of(
+            "dev", Set.of("orders-service", "payments-service"),
+            "local", Set.of("orders-service", "payments-service")
+    );
+    private final PendingActionService pendingActionService;
 
     public RestartServiceTool(MockDeploymentService deploymentService,
-                              RestartConfirmationPolicy confirmationPolicy) {
+                              PendingActionService pendingActionService) {
         this.deploymentService = deploymentService;
-        this.confirmationPolicy = confirmationPolicy;
+        this.pendingActionService = pendingActionService;
     }
 
     @Override public String name() { return NAME; }
@@ -53,17 +58,28 @@ public class RestartServiceTool implements Tool {
         }
         String service = requireString(arguments, "service");
         String environment = requireString(arguments, "environment").toLowerCase();
-        if (!confirmationPolicy.isAllowed(service, environment)) {
+        if (!ALLOWED_TARGETS.getOrDefault(environment, Set.of()).contains(service)) {
             throw new InvalidToolArgumentsException("Restart target is not allowed");
         }
+        PendingAction action = pendingActionService.create(context.conversationId(), NAME,
+                Map.of("service", service, "environment", environment));
+        return outcome(action.actionId(), service, environment, "CONFIRMATION_REQUIRED",
+                "Explicit user confirmation is required before restarting this service.",
+                "AWAITING_CONFIRMATION", "NOT_EXECUTED", startedAt);
+    }
 
-        if (!confirmationPolicy.consumeConfirmation(context.conversationId(), service, environment)) {
-            return outcome(service, environment, "CONFIRMATION_REQUIRED",
-                    "Explicit user confirmation is required before restarting this service.", false, startedAt);
+    /** Executes only an already-confirmed application-owned action using its stored arguments. */
+    public ToolExecutionOutcome executeConfirmed(PendingAction action) {
+        long startedAt = System.nanoTime();
+        if (!NAME.equals(action.toolName())) {
+            throw new ToolExecutionException("Unsupported confirmed action",
+                    new IllegalArgumentException(action.toolName()));
         }
-
+        String service = (String) action.arguments().get("service");
+        String environment = (String) action.arguments().get("environment");
         deploymentService.restartService(service, environment);
-        return outcome(service, environment, "RESTARTED", "Service restarted successfully.", true, startedAt);
+        return outcome(action.actionId(), service, environment, "RESTARTED", "Service restarted successfully.",
+                "CONFIRMED", "COMPLETED", startedAt);
     }
 
     private static String requireString(Map<String, Object> arguments, String name) {
@@ -74,18 +90,22 @@ public class RestartServiceTool implements Tool {
         return text.trim();
     }
 
-    private static ToolExecutionOutcome outcome(String service, String environment, String status,
-                                                String message, boolean confirmed, long startedAt) {
+    private static ToolExecutionOutcome outcome(String actionId, String service, String environment, String status,
+                                                String message, String confirmationStatus,
+                                                String executionStatus, long startedAt) {
         long durationMs = (System.nanoTime() - startedAt) / 1_000_000;
-        String content = "{\"service\":\"%s\",\"environment\":\"%s\",\"status\":\"%s\",\"message\":\"%s\"}"
-                .formatted(service, environment, status, message);
+        String content = "{\"actionId\":\"%s\",\"service\":\"%s\",\"environment\":\"%s\",\"status\":\"%s\",\"message\":\"%s\"}"
+                .formatted(actionId, service, environment, status, message);
         return new ToolExecutionOutcome(content, Map.of(
+                "actionId", actionId,
+                "tool", NAME,
+                "arguments", Map.of("service", service, "environment", environment),
                 "service", service,
                 "environment", environment,
                 "validationResult", "PASSED",
                 "confirmationRequired", true,
-                "confirmationStatus", confirmed ? "CONFIRMED" : "MISSING",
-                "executionStatus", status,
+                "confirmationStatus", confirmationStatus,
+                "executionStatus", executionStatus,
                 "executionDurationMs", durationMs
         ));
     }
