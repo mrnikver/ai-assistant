@@ -9,7 +9,10 @@
 
 ## Development workflow
 
-- Use the project Git flow: feature branch -> commit -> push -> pull request -> `main`. Never make feature changes directly on `main`.
+- Use `$git-workflow` for repository delivery. Every feature or project change starts from an updated `main` on a new, descriptive branch; never change `main` directly.
+- Branch names must not contain `codex`. Prefer an appropriate prefix such as `feature/`, `fix/`, `docs/`, or `chore/`.
+- Push the branch and open a pull request to `main`, then stop for user review. Do not merge the pull request.
+- After the user confirms the reviewed change was pushed or merged, verify it reached remote `main`, switch to local `main`, and pull it with fast-forward only.
 - Do not add tests unless the user explicitly requests them.
 - Update JavaDoc or maintained architecture documentation when a changed contract, invariant, or non-obvious flow would otherwise become misleading. Avoid comments that only restate code.
 - Never commit secrets or local credentials. Treat application configuration, prompts, memory, model payloads, tool arguments/results, and traces as potentially sensitive.
