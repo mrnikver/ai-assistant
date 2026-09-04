@@ -1,0 +1,7 @@
+interface:
+  display_name: "Feature Change Tracker"
+  short_description: "Record durable implementation change histories"
+  default_prompt: "Use $feature-change-tracker to track this implementation request from plan through delivery."
+
+policy:
+  allow_implicit_invocation: true
