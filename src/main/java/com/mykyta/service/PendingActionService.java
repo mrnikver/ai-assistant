@@ -29,9 +29,16 @@ public class PendingActionService {
         }
         String previousId = activeActionByConversation.get(conversationId);
         if (previousId != null) {
-            actionsById.computeIfPresent(previousId, (id, action) ->
-                    action.status() == PendingActionStatus.AWAITING_CONFIRMATION
-                            ? action.withStatus(PendingActionStatus.SUPERSEDED) : action);
+            PendingAction previous = actionsById.get(previousId);
+            if (previous != null && previous.status() == PendingActionStatus.AWAITING_CONFIRMATION) {
+                if (previous.createdAt().plus(CONFIRMATION_TTL).isBefore(Instant.now())) {
+                    actionsById.put(previousId, previous.withStatus(PendingActionStatus.EXPIRED));
+                } else if (previous.toolName().equals(toolName) && previous.arguments().equals(arguments)) {
+                    return previous;
+                } else {
+                    actionsById.put(previousId, previous.withStatus(PendingActionStatus.SUPERSEDED));
+                }
+            }
         }
 
         PendingAction action = new PendingAction(UUID.randomUUID().toString(), conversationId, toolName,
@@ -50,9 +57,12 @@ public class PendingActionService {
         if (actionId == null) return ConfirmationResolution.none();
 
         PendingAction action = actionsById.get(actionId);
-        if (action == null || action.status() != PendingActionStatus.AWAITING_CONFIRMATION) {
+        if (action == null) {
             activeActionByConversation.remove(conversationId, actionId);
             return ConfirmationResolution.none();
+        }
+        if (action.status() != PendingActionStatus.AWAITING_CONFIRMATION) {
+            return new ConfirmationResolution(ResolutionStatus.ALREADY_RESOLVED, action);
         }
         if (action.createdAt().plus(CONFIRMATION_TTL).isBefore(Instant.now())) {
             PendingAction expired = action.withStatus(PendingActionStatus.EXPIRED);
@@ -63,16 +73,20 @@ public class PendingActionService {
 
         PendingAction confirmed = action.withStatus(PendingActionStatus.CONFIRMED);
         actionsById.put(actionId, confirmed);
-        activeActionByConversation.remove(conversationId, actionId);
         return new ConfirmationResolution(ResolutionStatus.CONFIRMED, confirmed);
     }
 
-    public synchronized PendingAction markCompleted(String actionId) {
-        return transition(actionId, PendingActionStatus.CONFIRMED, PendingActionStatus.COMPLETED);
+    /** Atomically claims a confirmed action so stale or concurrent callers cannot execute it twice. */
+    public synchronized PendingAction beginExecution(String actionId) {
+        return transition(actionId, PendingActionStatus.CONFIRMED, PendingActionStatus.EXECUTING);
+    }
+
+    public synchronized PendingAction markExecuted(String actionId) {
+        return transition(actionId, PendingActionStatus.EXECUTING, PendingActionStatus.EXECUTED);
     }
 
     public synchronized PendingAction markFailed(String actionId) {
-        return transition(actionId, PendingActionStatus.CONFIRMED, PendingActionStatus.FAILED);
+        return transition(actionId, PendingActionStatus.EXECUTING, PendingActionStatus.FAILED);
     }
 
     public Optional<PendingAction> find(String actionId) {
@@ -93,12 +107,12 @@ public class PendingActionService {
         if (userMessage == null) return false;
         String normalized = userMessage.trim().toLowerCase().replaceAll("[.!?]+$", "");
         return SHORT_CONFIRMATIONS.contains(normalized)
-                || normalized.startsWith("i confirm ")
-                || normalized.startsWith("confirm the ")
-                || normalized.startsWith("please proceed with ");
+                || normalized.matches("i confirm (the )?(pending )?(restart|action)")
+                || normalized.matches("confirm (the )?(pending )?(restart|action)")
+                || normalized.matches("please proceed with (the )?(pending )?(restart|action)");
     }
 
-    public enum ResolutionStatus { NONE, CONFIRMED, EXPIRED }
+    public enum ResolutionStatus { NONE, CONFIRMED, EXPIRED, ALREADY_RESOLVED }
 
     public record ConfirmationResolution(ResolutionStatus status, PendingAction action) {
         private static ConfirmationResolution none() {

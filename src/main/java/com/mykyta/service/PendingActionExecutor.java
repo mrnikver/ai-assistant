@@ -32,24 +32,25 @@ public class PendingActionExecutor {
         if (action.status() != PendingActionStatus.CONFIRMED) {
             throw new IllegalStateException("Pending action is not confirmed");
         }
-        try (TraceScope span = agentTracer.startSpan(TraceSpanType.TOOL_CALL, "Confirmed action: " + action.toolName())) {
-            span.metadata("actionId", action.actionId());
-            span.metadata("tool", action.toolName());
-            span.metadata("arguments", sanitizer.map(action.arguments()));
+        PendingAction claimedAction = pendingActionService.beginExecution(action.actionId());
+        try (TraceScope span = agentTracer.startSpan(TraceSpanType.TOOL_CALL, "Confirmed action: " + claimedAction.toolName())) {
+            span.metadata("actionId", claimedAction.actionId());
+            span.metadata("tool", claimedAction.toolName());
+            span.metadata("arguments", sanitizer.map(claimedAction.arguments()));
             span.metadata("confirmationStatus", "CONFIRMED");
             span.metadata("executionStatus", "EXECUTING");
             try {
-                ToolExecutionOutcome outcome = switch (action.toolName()) {
-                    case RestartServiceTool.NAME -> restartServiceTool.executeConfirmed(action);
-                    default -> throw new IllegalStateException("No executor for confirmed tool: " + action.toolName());
+                ToolExecutionOutcome outcome = switch (claimedAction.toolName()) {
+                    case RestartServiceTool.NAME -> restartServiceTool.executeConfirmed(claimedAction);
+                    default -> throw new IllegalStateException("No executor for confirmed tool: " + claimedAction.toolName());
                 };
-                pendingActionService.markCompleted(action.actionId());
+                pendingActionService.markExecuted(claimedAction.actionId());
                 span.metadata(outcome.metadata());
-                log.info("Pending action completed: actionId={}, tool={}, confirmationStatus=CONFIRMED, executionStatus=COMPLETED",
-                        action.actionId(), action.toolName());
+                log.info("Pending action executed: actionId={}, tool={}, confirmationStatus=CONFIRMED, executionStatus=EXECUTED",
+                        claimedAction.actionId(), claimedAction.toolName());
                 return outcome;
             } catch (RuntimeException exception) {
-                pendingActionService.markFailed(action.actionId());
+                pendingActionService.markFailed(claimedAction.actionId());
                 span.metadata("executionStatus", "FAILED");
                 span.fail(exception);
                 throw exception;

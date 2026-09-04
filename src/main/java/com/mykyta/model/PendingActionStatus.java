@@ -4,7 +4,8 @@ package com.mykyta.model;
 public enum PendingActionStatus {
     AWAITING_CONFIRMATION,
     CONFIRMED,
-    COMPLETED,
+    EXECUTING,
+    EXECUTED,
     FAILED,
     EXPIRED,
     SUPERSEDED

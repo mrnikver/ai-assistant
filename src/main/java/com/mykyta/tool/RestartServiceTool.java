@@ -2,6 +2,7 @@ package com.mykyta.tool;
 
 import com.mykyta.service.MockDeploymentService;
 import com.mykyta.model.PendingAction;
+import com.mykyta.model.PendingActionDetails;
 import com.mykyta.service.PendingActionService;
 import org.springframework.stereotype.Component;
 
@@ -63,9 +64,13 @@ public class RestartServiceTool implements Tool {
         }
         PendingAction action = pendingActionService.create(context.conversationId(), NAME,
                 Map.of("service", service, "environment", environment));
-        return outcome(action.actionId(), service, environment, "CONFIRMATION_REQUIRED",
+        ToolExecutionOutcome outcome = outcome(action.actionId(), service, environment, "CONFIRMATION_REQUIRED",
                 "Explicit user confirmation is required before restarting this service.",
                 "AWAITING_CONFIRMATION", "NOT_EXECUTED", startedAt);
+        return ToolExecutionOutcome.confirmationRequired(outcome.content(), outcome.metadata(),
+                new PendingActionDetails(action.actionId(), NAME, action.arguments(), true,
+                        action.status(), "NOT_EXECUTED",
+                        "Explicit user confirmation is required before restarting this service."));
     }
 
     /** Executes only an already-confirmed application-owned action using its stored arguments. */
@@ -79,7 +84,7 @@ public class RestartServiceTool implements Tool {
         String environment = (String) action.arguments().get("environment");
         deploymentService.restartService(service, environment);
         return outcome(action.actionId(), service, environment, "RESTARTED", "Service restarted successfully.",
-                "CONFIRMED", "COMPLETED", startedAt);
+                "CONFIRMED", "EXECUTED", startedAt);
     }
 
     private static String requireString(Map<String, Object> arguments, String name) {

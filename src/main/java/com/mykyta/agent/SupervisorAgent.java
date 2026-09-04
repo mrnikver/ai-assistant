@@ -127,6 +127,19 @@ public class SupervisorAgent {
             }
             try {
                 AgentResult result = investigation.run(question.trim(), context);
+                if (result.confirmationRequired() != null) {
+                    return ToolExecutionOutcome.confirmationRequired(
+                            result.confirmationRequired().message(),
+                            Map.of(
+                                    "pendingActionId", result.confirmationRequired().pendingActionId(),
+                                    "tool", result.confirmationRequired().tool(),
+                                    "confirmationStatus", result.confirmationRequired().confirmationStatus().name(),
+                                    "executionStatus", result.confirmationRequired().executionStatus(),
+                                    "loopStopped", true,
+                                    "stopReason", "CONFIRMATION_REQUIRED"
+                            ),
+                            result.confirmationRequired());
+                }
                 return ToolExecutionOutcome.observation("Specialist finding (confidence="
                         + result.response().confidence() + "): " + result.response().answer());
             } catch (IOException exception) {

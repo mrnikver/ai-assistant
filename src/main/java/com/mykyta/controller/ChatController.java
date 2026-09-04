@@ -52,7 +52,8 @@ public class ChatController {
             var response = execution.response();
 
             log.info(
-                    "Chat response ready: confidence={}, answerLength={}, durationMs={}",
+                    "Chat response ready: status={}, confidence={}, answerLength={}, durationMs={}",
+                    execution.status(),
                     response.confidence(),
                     response.answer().length(),
                     (System.nanoTime() - startedAt) / 1_000_000
@@ -63,7 +64,9 @@ public class ChatController {
                     conversationId,
                     response.answer(),
                     response.confidence(),
-                    execution.trace()
+                    execution.trace(),
+                    execution.status(),
+                    execution.pendingAction()
             );
         } catch (Exception exception) {
             log.error(

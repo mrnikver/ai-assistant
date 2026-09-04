@@ -10,8 +10,10 @@ package com.mykyta.model;
  * @param toolName requested tool name
  * @param successful whether execution completed successfully
  * @param content result or safe error description returned to the model
+ * @param confirmationRequired typed terminal state that must not be returned to the model
  */
-public record ToolResult(String toolName, boolean successful, String content) {
+public record ToolResult(String toolName, boolean successful, String content,
+                         PendingActionDetails confirmationRequired) {
 
     /**
      * Creates a successful observation.
@@ -21,7 +23,11 @@ public record ToolResult(String toolName, boolean successful, String content) {
      * @return successful tool result
      */
     public static ToolResult success(String toolName, String content) {
-        return new ToolResult(toolName, true, content);
+        return new ToolResult(toolName, true, content, null);
+    }
+
+    public static ToolResult confirmationRequired(String toolName, String content, PendingActionDetails action) {
+        return new ToolResult(toolName, true, content, action);
     }
 
     /**
@@ -32,7 +38,7 @@ public record ToolResult(String toolName, boolean successful, String content) {
      * @return failed tool result
      */
     public static ToolResult failure(String toolName, String message) {
-        return new ToolResult(toolName, false, message);
+        return new ToolResult(toolName, false, message, null);
     }
 
     /**
