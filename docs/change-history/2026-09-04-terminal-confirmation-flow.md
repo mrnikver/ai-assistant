@@ -75,5 +75,5 @@ None.
 
 - Branch: `fix/terminal-confirmation-flow`
 - Commit: `4d00222` (implementation), plus a delivery-metadata follow-up commit.
-- Pull request: Not opened yet.
+- Pull request: https://github.com/mrnikver/ai-assistant/pull/30
 - Merge status: Not merged; pending implementation and review.
