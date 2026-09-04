@@ -61,6 +61,6 @@ None.
 ## Git / Delivery
 
 - Branch: `docs/feature-change-tracker`
-- Commit: To be created as part of this delivery.
-- Pull request: To be opened after the branch is pushed.
+- Related commit: `e26090b` (`Add feature change tracking skill`)
+- Pull request: [#28](https://github.com/mrnikver/ai-assistant/pull/28)
 - Merge status: Not merged; awaiting review.
