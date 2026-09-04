@@ -45,4 +45,12 @@ public interface Tool {
      * @throws ToolExecutionException when the underlying capability cannot complete
      */
     String execute(Map<String, Object> arguments);
+
+    /**
+     * Executes with trusted request context and may expose safe trace metadata.
+     * Existing read-only tools use the context-free implementation by default.
+     */
+    default ToolExecutionOutcome execute(Map<String, Object> arguments, ToolExecutionContext context) {
+        return ToolExecutionOutcome.observation(execute(arguments));
+    }
 }

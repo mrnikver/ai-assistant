@@ -5,6 +5,11 @@ import org.springframework.stereotype.Service;
 /** Restored deterministic operational data used by the runtime investigation tools. */
 @Service
 public class MockDeploymentService {
+    /** Performs the deterministic no-infrastructure restart used by the demo architecture. */
+    public void restartService(String serviceName, String environment) {
+        // Allowed targets and confirmation are enforced before this local/demo action is reached.
+    }
+
     public String getDeploymentStatus(String serviceName) {
         return switch (serviceName) {
             case "payments-service" -> "FAILED";

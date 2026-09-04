@@ -11,6 +11,7 @@ import com.mykyta.observability.LlmPurpose;
 import com.mykyta.observability.LlmObservabilitySanitizer;
 import com.mykyta.response.AssistantResponse;
 import com.mykyta.tool.ToolRegistry;
+import com.mykyta.tool.ToolExecutionContext;
 import com.mykyta.trace.AgentTracer;
 import com.mykyta.trace.TraceScope;
 import com.mykyta.trace.TraceSpanType;
@@ -37,10 +38,19 @@ public class AgentRuntime {
     public AgentResult run(AgentDefinition definition, List<LLMMessage> suppliedContext,
                            int historyMessageCount, int memoryCount, String userRequest)
             throws IOException, InterruptedException {
+        return run(definition, suppliedContext, historyMessageCount, memoryCount, userRequest,
+                ToolExecutionContext.NONE);
+    }
+
+    /** Runs an isolated agent with application-owned execution context for guarded tools. */
+    public AgentResult run(AgentDefinition definition, List<LLMMessage> suppliedContext,
+                           int historyMessageCount, int memoryCount, String userRequest,
+                           ToolExecutionContext executionContext)
+            throws IOException, InterruptedException {
         List<LLMMessage> context = new ArrayList<>();
         context.add(new LLMMessage("system", definition.systemPrompt()));
         context.addAll(suppliedContext);
-        ToolRegistry registry = new ToolRegistry(definition.tools(), agentTracer, sanitizer);
+        ToolRegistry registry = new ToolRegistry(definition.tools(), agentTracer, sanitizer, executionContext);
         TraceSpanType spanType = definition.type() == AgentType.SUPERVISOR
                 ? TraceSpanType.SUPERVISOR : TraceSpanType.AGENT;
 
