@@ -74,6 +74,6 @@ None.
 ## Git / Delivery
 
 - Branch: `fix/terminal-confirmation-flow`
-- Commit: `6554611` (initial implementation commit; delivery metadata finalized before push).
+- Commit: `4d00222` (implementation), plus a delivery-metadata follow-up commit.
 - Pull request: Not opened yet.
 - Merge status: Not merged; pending implementation and review.
