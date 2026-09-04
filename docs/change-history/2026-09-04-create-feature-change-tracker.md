@@ -63,4 +63,4 @@ None.
 - Branch: `docs/feature-change-tracker`
 - Related commit: `e26090b` (`Add feature change tracking skill`)
 - Pull request: [#28](https://github.com/mrnikver/ai-assistant/pull/28)
-- Merge status: Not merged; awaiting review.
+- Merge status: Merged into `main` as `051b7d31fd2dcde24f62c446030a611ab59b2430` on 2026-09-04.
