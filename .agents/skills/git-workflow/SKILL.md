@@ -7,6 +7,8 @@ description: Deliver project changes through a safe branch, commit, push, pull-r
 
 Apply this workflow independently in every affected repository. Preserve unrelated working-tree and index changes throughout.
 
+Use command-line tooling for the entire workflow. Never use Codex UI, browser automation, or web forms for Git or GitHub operations. Use the `git` CLI for repository operations and the `gh` CLI for GitHub pull-request operations. If the required CLI authentication is unavailable, report the blocker and ask the user to authenticate it; do not fall back to UI.
+
 ## Start work
 
 1. Inspect `git status`, the current branch, remotes, and relevant repository instructions.
@@ -23,4 +25,3 @@ Apply this workflow independently in every affected repository. Preserve unrelat
 ## Synchronize after review
 
 When the user says the reviewed change was pushed or merged, first verify that remote `main` contains the pull-request change. If it does, switch to `main` and run a fast-forward-only pull, then report the synchronized commit. If it does not, keep the feature branch intact and explain that the PR has not reached `main`; never force or bypass the review workflow.
-
