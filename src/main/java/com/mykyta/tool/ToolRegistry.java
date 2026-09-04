@@ -115,9 +115,9 @@ public class ToolRegistry {
             ToolExecutionOutcome outcome = tool.execute(arguments, executionContext);
             span.metadata(outcome.metadata());
             if (RestartServiceTool.NAME.equals(toolName)) {
-                log.info("Restart tool evaluated: service={}, environment={}, validationResult={}, "
+                log.info("Restart tool evaluated: actionId={}, service={}, environment={}, validationResult={}, "
                                 + "confirmationRequired={}, confirmationStatus={}, executionStatus={}, executionDurationMs={}",
-                        outcome.metadata().get("service"), outcome.metadata().get("environment"),
+                        outcome.metadata().get("actionId"), outcome.metadata().get("service"), outcome.metadata().get("environment"),
                         outcome.metadata().get("validationResult"), outcome.metadata().get("confirmationRequired"),
                         outcome.metadata().get("confirmationStatus"), outcome.metadata().get("executionStatus"),
                         outcome.metadata().get("executionDurationMs"));

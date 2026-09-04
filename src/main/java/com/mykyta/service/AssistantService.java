@@ -39,7 +39,8 @@ public class AssistantService {
     private final MemoryExtractorService memoryExtractorService;
     private final AgentTracer agentTracer;
     private final TraceService traceService;
-    private final RestartConfirmationPolicy restartConfirmationPolicy;
+    private final PendingActionService pendingActionService;
+    private final PendingActionExecutor pendingActionExecutor;
 
 
     /**
@@ -61,7 +62,8 @@ public class AssistantService {
             MemoryExtractorService memoryExtractorService,
             AgentTracer agentTracer,
             TraceService traceService,
-            RestartConfirmationPolicy restartConfirmationPolicy
+            PendingActionService pendingActionService,
+            PendingActionExecutor pendingActionExecutor
     ) {
         this.conversationService = conversationService;
         this.supervisorAgent = supervisorAgent;
@@ -70,7 +72,8 @@ public class AssistantService {
         this.memoryExtractorService = memoryExtractorService;
         this.agentTracer = agentTracer;
         this.traceService = traceService;
-        this.restartConfirmationPolicy = restartConfirmationPolicy;
+        this.pendingActionService = pendingActionService;
+        this.pendingActionExecutor = pendingActionExecutor;
     }
 
     /**
@@ -107,7 +110,14 @@ public class AssistantService {
 
         List<LLMMessage> context = new ArrayList<>();
         log.info("Assistant flow started");
-        restartConfirmationPolicy.acceptUserMessage(conversationId, userMessage);
+        PendingActionService.ConfirmationResolution confirmation =
+                pendingActionService.resolveConfirmation(conversationId, userMessage);
+        String confirmedActionObservation = null;
+        if (confirmation.status() == PendingActionService.ResolutionStatus.CONFIRMED) {
+            confirmedActionObservation = pendingActionExecutor.execute(confirmation.action()).content();
+        } else if (confirmation.status() == PendingActionService.ResolutionStatus.EXPIRED) {
+            confirmedActionObservation = "The pending action expired and was not executed. A new action request is required.";
+        }
 
         log.debug("Starting persistent memory extraction");
         MemoryExtractionResponse memoryCandidate =
@@ -149,14 +159,25 @@ public class AssistantService {
         List<LLMMessage> recentMessages = conversationService.getRecentMessages(
                 conversationId, assistantProperties.historyLimit());
         context.addAll(recentMessages);
+        if (confirmedActionObservation != null) {
+            context.add(new LLMMessage("system", """
+                    Application-controlled confirmation result:
+                    %s
+                    The application has already resolved this pending action. Do not reconstruct, modify, or request
+                    the tool call again. Explain this result directly to the user.
+                    """.formatted(confirmedActionObservation)));
+        }
         log.debug("Recent conversation history added: contextMessageCount={}", context.size());
 
         LLMMessage currentUserMessage = new LLMMessage("user", userMessage);
 
         context.add(currentUserMessage);
 
-        AgentResult agentResult = supervisorAgent.run(context, recentMessages.size(), memories.size(), userMessage,
-                new ToolExecutionContext(conversationId));
+        AgentResult agentResult = confirmedActionObservation == null
+                ? supervisorAgent.run(context, recentMessages.size(), memories.size(), userMessage,
+                        new ToolExecutionContext(conversationId))
+                : supervisorAgent.respondToConfirmedAction(
+                        context, recentMessages.size(), memories.size(), userMessage);
         AssistantResponse answer = agentResult.response();
 
         log.debug(

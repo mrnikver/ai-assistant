@@ -94,13 +94,13 @@ The runtime capabilities were recovered from Git history predating the RAG refac
 
 Both tools validate that `serviceName` is a non-blank string. They are intentionally mock operational data, not live infrastructure integrations.
 
-`restart_service(service, environment)` is a state-changing local/demo capability. The tool rejects malformed or unexpected arguments and targets outside the application allow-list (`orders-service` and `payments-service` in `dev` or `local`). A first valid request records the target and returns `CONFIRMATION_REQUIRED` without executing it. Only an explicit follow-up user confirmation in the same conversation authorizes that pending target, and the confirmation is consumed by one matching execution. Repeated calls therefore require a new confirmation. This policy is enforced in Java and is independent of prompt compliance.
+`restart_service(service, environment)` is a state-changing local/demo capability. The tool rejects malformed or unexpected arguments and targets outside the application allow-list (`orders-service` and `payments-service` in `dev` or `local`). A valid request creates an application-owned pending action containing an ID, conversation ID, tool name, complete validated arguments, status, and creation time, then returns `CONFIRMATION_REQUIRED` without executing it. An explicit follow-up confirmation is bound only to the active pending action in that conversation. The application verifies its one-shot state and expiry, executes the exact stored tool and arguments without asking the LLM to reconstruct them, and marks the action completed before giving the result to the agent for its final response. Repeated or expired confirmations cannot execute the action.
 
 ## Tool calling and bounded execution
 
 Each agent loop sends its current context and exact allow-list to Ollama. Requested calls are validated, executed, converted to controlled `ToolResult` observations, and returned to that same agent. Unknown tools, invalid arguments, and operational failures cannot invoke arbitrary Java code. Limits are independent: `agent.supervisor-max-iterations`, `agent.knowledge-max-iterations`, and `agent.runtime-max-iterations`.
 
-For guarded tools, application-owned execution context follows Supervisor delegation into the specialist registry. Restart traces record the safe target, validation result, confirmation requirement/status, execution status, and duration. Prompt instructions help the agent explain the flow but are not an authorization boundary.
+For guarded tools, application-owned execution context follows Supervisor delegation into the specialist registry. Pending-action traces record the action ID, tool, sanitized validated arguments, confirmation status, execution status, and duration across request and confirmation turns. Prompt instructions help the agent explain the flow but are not an authorization boundary.
 
 ## Persistent memory and conversation history
 
@@ -181,6 +181,6 @@ The React UI includes two related views. “View execution” renders the generi
 - Tool-enabled Ollama calls omit structured `format`; malformed final JSON falls back to medium-confidence plain text.
 - Runtime results are deterministic mocks, not live service health.
 - Persistent memory is application-wide rather than user-scoped.
-- Conversation history and traces are in memory and disappear on restart; traces may also be evicted.
+- Conversation history, pending actions, and traces are in memory and disappear on restart; traces may also be evicted.
 - RAG has no minimum similarity threshold, and large retrievals consume model context. Source filters constrain evidence category but do not replace relevance evaluation.
 - Specialist execution is sequential when a Supervisor response requests both delegations.
