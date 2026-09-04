@@ -52,7 +52,7 @@ The hierarchy is fixed and non-recursive:
 
 - `SupervisorAgent` may invoke `ask_knowledge_agent` and `ask_runtime_agent` only. It cannot directly execute RAG or runtime tools.
 - `KnowledgeAgent` may invoke `search_knowledge_base` only. It cannot access runtime tools or claim current operational state.
-- `RuntimeAgent` may invoke `getDeploymentStatus` and `getDeploymentLogs` only. It cannot access RAG or treat mock state as documentation.
+- `RuntimeAgent` may invoke `getDeploymentStatus`, `getDeploymentLogs`, and guarded `restart_service` only. It cannot access RAG or treat mock state as documentation.
 - Specialized agents cannot invoke the Supervisor or one another.
 
 Only application-controlled `AgentDefinition` and `ToolRegistry` configuration grants capabilities. Model-generated tool names are inert data until Java validates them.
@@ -94,9 +94,13 @@ The runtime capabilities were recovered from Git history predating the RAG refac
 
 Both tools validate that `serviceName` is a non-blank string. They are intentionally mock operational data, not live infrastructure integrations.
 
+`restart_service(service, environment)` is a state-changing local/demo capability. The tool rejects malformed or unexpected arguments and targets outside the application allow-list (`orders-service` and `payments-service` in `dev` or `local`). A first valid request records the target and returns `CONFIRMATION_REQUIRED` without executing it. Only an explicit follow-up user confirmation in the same conversation authorizes that pending target, and the confirmation is consumed by one matching execution. Repeated calls therefore require a new confirmation. This policy is enforced in Java and is independent of prompt compliance.
+
 ## Tool calling and bounded execution
 
 Each agent loop sends its current context and exact allow-list to Ollama. Requested calls are validated, executed, converted to controlled `ToolResult` observations, and returned to that same agent. Unknown tools, invalid arguments, and operational failures cannot invoke arbitrary Java code. Limits are independent: `agent.supervisor-max-iterations`, `agent.knowledge-max-iterations`, and `agent.runtime-max-iterations`.
+
+For guarded tools, application-owned execution context follows Supervisor delegation into the specialist registry. Restart traces record the safe target, validation result, confirmation requirement/status, execution status, and duration. Prompt instructions help the agent explain the flow but are not an authorization boundary.
 
 ## Persistent memory and conversation history
 

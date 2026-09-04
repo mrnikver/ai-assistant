@@ -8,6 +8,8 @@ If a deployment fails with "Database connection refused":
 4. Check security groups and firewall rules.
 5. Verify database credentials and secrets.
 6. Check whether the application is using the correct environment configuration.
+7. If the database is healthy and configuration/network issues have been resolved but the service still cannot establish a connection, consider restarting the affected service.
+8. A service restart is a state-changing operation and requires explicit user confirmation before execution.
 
 If a deployment is stuck in RUNNING state:
 
@@ -15,3 +17,5 @@ If a deployment is stuck in RUNNING state:
 2. Verify health check configuration.
 3. Check whether the new application instance becomes healthy.
 4. Inspect CPU and memory usage.
+5. If the service appears unhealthy or stuck after the underlying issue has been investigated, consider restarting the affected service.
+6. A service restart is a state-changing operation and requires explicit user confirmation before execution.

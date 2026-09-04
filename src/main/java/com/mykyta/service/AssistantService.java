@@ -13,6 +13,7 @@ import com.mykyta.trace.AgentTrace;
 import com.mykyta.trace.AgentTracer;
 import com.mykyta.trace.TraceScope;
 import com.mykyta.trace.TraceSpanType;
+import com.mykyta.tool.ToolExecutionContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -38,6 +39,7 @@ public class AssistantService {
     private final MemoryExtractorService memoryExtractorService;
     private final AgentTracer agentTracer;
     private final TraceService traceService;
+    private final RestartConfirmationPolicy restartConfirmationPolicy;
 
 
     /**
@@ -58,7 +60,8 @@ public class AssistantService {
             MemoryService memoryService,
             MemoryExtractorService memoryExtractorService,
             AgentTracer agentTracer,
-            TraceService traceService
+            TraceService traceService,
+            RestartConfirmationPolicy restartConfirmationPolicy
     ) {
         this.conversationService = conversationService;
         this.supervisorAgent = supervisorAgent;
@@ -67,6 +70,7 @@ public class AssistantService {
         this.memoryExtractorService = memoryExtractorService;
         this.agentTracer = agentTracer;
         this.traceService = traceService;
+        this.restartConfirmationPolicy = restartConfirmationPolicy;
     }
 
     /**
@@ -103,6 +107,7 @@ public class AssistantService {
 
         List<LLMMessage> context = new ArrayList<>();
         log.info("Assistant flow started");
+        restartConfirmationPolicy.acceptUserMessage(conversationId, userMessage);
 
         log.debug("Starting persistent memory extraction");
         MemoryExtractionResponse memoryCandidate =
@@ -150,7 +155,8 @@ public class AssistantService {
 
         context.add(currentUserMessage);
 
-        AgentResult agentResult = supervisorAgent.run(context, recentMessages.size(), memories.size(), userMessage);
+        AgentResult agentResult = supervisorAgent.run(context, recentMessages.size(), memories.size(), userMessage,
+                new ToolExecutionContext(conversationId));
         AssistantResponse answer = agentResult.response();
 
         log.debug(

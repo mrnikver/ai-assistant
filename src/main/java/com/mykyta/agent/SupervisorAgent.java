@@ -6,6 +6,8 @@ import com.mykyta.model.LLMMessage;
 import com.mykyta.tool.InvalidToolArgumentsException;
 import com.mykyta.tool.Tool;
 import com.mykyta.tool.ToolExecutionException;
+import com.mykyta.tool.ToolExecutionContext;
+import com.mykyta.tool.ToolExecutionOutcome;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -68,7 +70,7 @@ public class SupervisorAgent {
                                         + "its architecture, implementation, source code, configuration, design decisions, "
                                         + "RAG, agents, tools, memory, tracing, runbooks, and documentation. Use this before "
                                         + "making project-specific factual claims.",
-                                knowledgeAgent::investigate),
+                                (question, context) -> knowledgeAgent.investigate(question)),
                         new DelegationTool("ask_runtime_agent",
                                 "Ask the runtime specialist to investigate current mocked deployment state or logs.",
                                 runtimeAgent::investigate)
@@ -77,11 +79,19 @@ public class SupervisorAgent {
 
     public AgentResult run(List<LLMMessage> context, int historyMessageCount, int memoryCount, String userRequest)
             throws IOException, InterruptedException {
-        return runtime.run(definition, context, historyMessageCount, memoryCount, userRequest);
+        return run(context, historyMessageCount, memoryCount, userRequest, ToolExecutionContext.NONE);
+    }
+
+    public AgentResult run(List<LLMMessage> context, int historyMessageCount, int memoryCount, String userRequest,
+                           ToolExecutionContext executionContext)
+            throws IOException, InterruptedException {
+        return runtime.run(definition, context, historyMessageCount, memoryCount, userRequest, executionContext);
     }
 
     @FunctionalInterface
-    private interface Investigation { AgentResult run(String question) throws IOException, InterruptedException; }
+    private interface Investigation {
+        AgentResult run(String question, ToolExecutionContext context) throws IOException, InterruptedException;
+    }
 
     /** Internal delegation boundary; only the Supervisor definition receives these tools. */
     private record DelegationTool(String name, String description, Investigation investigation) implements Tool {
@@ -94,14 +104,18 @@ public class SupervisorAgent {
         }
 
         @Override public String execute(Map<String, Object> arguments) {
+            return execute(arguments, ToolExecutionContext.NONE).content();
+        }
+
+        @Override public ToolExecutionOutcome execute(Map<String, Object> arguments, ToolExecutionContext context) {
             Object value = arguments.get("question");
             if (!(value instanceof String question) || question.isBlank()) {
                 throw new InvalidToolArgumentsException("Argument 'question' must be a non-blank string");
             }
             try {
-                AgentResult result = investigation.run(question.trim());
-                return "Specialist finding (confidence=" + result.response().confidence() + "): "
-                        + result.response().answer();
+                AgentResult result = investigation.run(question.trim(), context);
+                return ToolExecutionOutcome.observation("Specialist finding (confidence="
+                        + result.response().confidence() + "): " + result.response().answer());
             } catch (IOException exception) {
                 throw new ToolExecutionException("Specialist investigation failed", exception);
             } catch (InterruptedException exception) {

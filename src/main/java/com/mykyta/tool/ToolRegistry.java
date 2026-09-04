@@ -35,6 +35,7 @@ public class ToolRegistry {
     private final Map<String, Tool> tools;
     private final AgentTracer agentTracer;
     private final LlmObservabilitySanitizer sanitizer;
+    private final ToolExecutionContext executionContext;
 
     /**
      * Builds an agent-scoped registry from its explicit tools and rejects duplicate names.
@@ -44,9 +45,10 @@ public class ToolRegistry {
      * @throws IllegalStateException if two tools expose the same name
      */
     public ToolRegistry(List<Tool> registeredTools, AgentTracer agentTracer,
-                        LlmObservabilitySanitizer sanitizer) {
+                        LlmObservabilitySanitizer sanitizer, ToolExecutionContext executionContext) {
         this.agentTracer = agentTracer;
         this.sanitizer = sanitizer;
+        this.executionContext = executionContext;
         this.tools = Collections.unmodifiableMap(registeredTools.stream().collect(Collectors.toMap(
                 Tool::name,
                 Function.identity(),
@@ -110,10 +112,33 @@ public class ToolRegistry {
         span.metadata("arguments", sanitizer.map(arguments));
 
         try {
-            return ToolResult.success(toolName, tool.execute(arguments));
+            ToolExecutionOutcome outcome = tool.execute(arguments, executionContext);
+            span.metadata(outcome.metadata());
+            if (RestartServiceTool.NAME.equals(toolName)) {
+                log.info("Restart tool evaluated: service={}, environment={}, validationResult={}, "
+                                + "confirmationRequired={}, confirmationStatus={}, executionStatus={}, executionDurationMs={}",
+                        outcome.metadata().get("service"), outcome.metadata().get("environment"),
+                        outcome.metadata().get("validationResult"), outcome.metadata().get("confirmationRequired"),
+                        outcome.metadata().get("confirmationStatus"), outcome.metadata().get("executionStatus"),
+                        outcome.metadata().get("executionDurationMs"));
+            }
+            return ToolResult.success(toolName, outcome.content());
         } catch (InvalidToolArgumentsException exception) {
+            span.metadata("validationResult", "REJECTED");
+            span.metadata("confirmationRequired", false);
+            span.metadata("confirmationStatus", "NOT_EVALUATED");
+            span.metadata("executionStatus", "NOT_EXECUTED");
+            span.metadata("service", sanitizer.preview(String.valueOf(arguments.get("service"))));
+            span.metadata("environment", sanitizer.preview(String.valueOf(arguments.get("environment"))));
             log.warn("Tool arguments rejected: tool={}, argumentNames={}, reason={}",
                     toolName, arguments.keySet(), exception.getMessage());
+            if (RestartServiceTool.NAME.equals(toolName)) {
+                log.warn("Restart tool rejected: service={}, environment={}, validationResult=REJECTED, "
+                                + "confirmationRequired=false, confirmationStatus=NOT_EVALUATED, "
+                                + "executionStatus=NOT_EXECUTED",
+                        sanitizer.preview(String.valueOf(arguments.get("service"))),
+                        sanitizer.preview(String.valueOf(arguments.get("environment"))));
+            }
             return ToolResult.failure(toolName, exception.getMessage());
         } catch (ToolExecutionException exception) {
             log.error("Tool execution failed: tool={}, argumentNames={}", toolName, arguments.keySet(), exception);
