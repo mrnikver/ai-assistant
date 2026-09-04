@@ -8,10 +8,15 @@ import com.mykyta.response.AssistantResponse;
  * @param response final structured answer produced by the LLM
  * @param iterations number of LLM decisions made during the run
  * @param toolExecutions number of tool requests executed, including controlled failures
+ * @param confirmationRequired typed terminal state produced by a guarded tool, if any
  */
 public record AgentResult(
         AssistantResponse response,
         int iterations,
-        int toolExecutions
+        int toolExecutions,
+        PendingActionDetails confirmationRequired
 ) {
+    public AgentResult(AssistantResponse response, int iterations, int toolExecutions) {
+        this(response, iterations, toolExecutions, null);
+    }
 }

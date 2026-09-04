@@ -83,7 +83,9 @@ public class ToolRegistry {
             ToolResult result = executeRegistered(toolCall, span);
             span.metadata("successful", result.successful());
             span.metadata("resultLength", result.content().length());
-            span.metadata("resultSummary", result.successful() ? "Observation returned" : "Controlled failure returned");
+            span.metadata("resultSummary", result.confirmationRequired() != null
+                    ? "Confirmation required; agent loop must stop"
+                    : result.successful() ? "Observation returned" : "Controlled failure returned");
             if (!result.successful()) {
                 span.metadata("error", result.content());
                 span.fail(new IllegalStateException("Controlled tool failure"));
@@ -122,7 +124,9 @@ public class ToolRegistry {
                         outcome.metadata().get("confirmationStatus"), outcome.metadata().get("executionStatus"),
                         outcome.metadata().get("executionDurationMs"));
             }
-            return ToolResult.success(toolName, outcome.content());
+            return outcome.confirmationRequired() == null
+                    ? ToolResult.success(toolName, outcome.content())
+                    : ToolResult.confirmationRequired(toolName, outcome.content(), outcome.confirmationRequired());
         } catch (InvalidToolArgumentsException exception) {
             span.metadata("validationResult", "REJECTED");
             span.metadata("confirmationRequired", false);

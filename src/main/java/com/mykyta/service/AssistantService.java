@@ -4,8 +4,10 @@ import com.mykyta.config.AssistantProperties;
 import com.mykyta.entity.Memory;
 import com.mykyta.agent.SupervisorAgent;
 import com.mykyta.model.AgentResult;
+import com.mykyta.model.AssistantResponseStatus;
 import com.mykyta.model.AssistantExecution;
 import com.mykyta.model.LLMMessage;
+import com.mykyta.model.PendingActionDetails;
 import com.mykyta.response.AssistantResponse;
 import com.mykyta.response.MemoryExtractionResponse;
 import com.mykyta.response.TraceSummaryResponse;
@@ -90,9 +92,9 @@ public class AssistantService {
     ) throws Exception {
 
         AgentTracer.TraceSession traceSession = agentTracer.beginTrace();
-        AssistantResponse answer;
+        AssistantFlowResult flowResult;
         try {
-            answer = executeAssistantFlow(conversationId, userMessage);
+            flowResult = executeAssistantFlow(conversationId, userMessage);
         } catch (Exception exception) {
             traceSession.fail(exception);
             traceSession.close();
@@ -103,20 +105,43 @@ public class AssistantService {
         traceSession.close();
         AgentTrace trace = traceSession.completedTrace();
         TraceSummaryResponse summary = traceService.save(trace);
-        return new AssistantExecution(answer, summary);
+        return new AssistantExecution(flowResult.response(), summary, flowResult.status(), flowResult.pendingAction());
     }
 
-    private AssistantResponse executeAssistantFlow(String conversationId, String userMessage) throws Exception {
+    private AssistantFlowResult executeAssistantFlow(String conversationId, String userMessage) throws Exception {
 
         List<LLMMessage> context = new ArrayList<>();
         log.info("Assistant flow started");
         PendingActionService.ConfirmationResolution confirmation =
                 pendingActionService.resolveConfirmation(conversationId, userMessage);
         String confirmedActionObservation = null;
+        AssistantResponseStatus responseStatus = AssistantResponseStatus.ANSWER;
+        PendingActionDetails pendingActionDetails = null;
         if (confirmation.status() == PendingActionService.ResolutionStatus.CONFIRMED) {
-            confirmedActionObservation = pendingActionExecutor.execute(confirmation.action()).content();
+            var executionOutcome = pendingActionExecutor.execute(confirmation.action());
+            confirmedActionObservation = executionOutcome.content();
+            responseStatus = AssistantResponseStatus.ACTION_EXECUTED;
+            var executedAction = pendingActionService.find(confirmation.action().actionId())
+                    .orElseThrow(() -> new IllegalStateException("Executed pending action disappeared"));
+            pendingActionDetails = details(executedAction, false, "EXECUTED",
+                    "Service restarted successfully.");
         } else if (confirmation.status() == PendingActionService.ResolutionStatus.EXPIRED) {
             confirmedActionObservation = "The pending action expired and was not executed. A new action request is required.";
+            responseStatus = AssistantResponseStatus.ACTION_EXPIRED;
+            pendingActionDetails = details(confirmation.action(), false, "NOT_EXECUTED", confirmedActionObservation);
+        } else if (confirmation.status() == PendingActionService.ResolutionStatus.ALREADY_RESOLVED) {
+            confirmedActionObservation = "This pending action was already resolved and will not be executed again.";
+            responseStatus = AssistantResponseStatus.ACTION_ALREADY_RESOLVED;
+            pendingActionDetails = details(confirmation.action(), false,
+                    confirmation.action().status() == com.mykyta.model.PendingActionStatus.EXECUTED
+                            ? "EXECUTED" : "NOT_EXECUTED",
+                    confirmedActionObservation);
+        }
+        if (confirmation.action() != null) {
+            log.info("Pending action confirmation resolved: pendingActionId={}, tool={}, confirmationStatus={}, "
+                            + "executionStatus={}",
+                    confirmation.action().actionId(), confirmation.action().toolName(), confirmation.action().status(),
+                    pendingActionDetails == null ? "PENDING" : pendingActionDetails.executionStatus());
         }
 
         log.debug("Starting persistent memory extraction");
@@ -179,6 +204,14 @@ public class AssistantService {
                 : supervisorAgent.respondToConfirmedAction(
                         context, recentMessages.size(), memories.size(), userMessage);
         AssistantResponse answer = agentResult.response();
+        if (agentResult.confirmationRequired() != null) {
+            responseStatus = AssistantResponseStatus.CONFIRMATION_REQUIRED;
+            pendingActionDetails = agentResult.confirmationRequired();
+            log.info("Agent loop stopped for confirmation: pendingActionId={}, tool={}, confirmationStatus={}, "
+                            + "executionStatus={}, loopStopped=true",
+                    pendingActionDetails.pendingActionId(), pendingActionDetails.tool(),
+                    pendingActionDetails.confirmationStatus(), pendingActionDetails.executionStatus());
+        }
 
         log.debug(
                 "Agent stage completed: iterations={}, toolExecutions={}, contextMessageCount={}",
@@ -194,10 +227,28 @@ public class AssistantService {
         try (TraceScope finalResponse = agentTracer.startSpan(TraceSpanType.FINAL_RESPONSE, "Final response")) {
             finalResponse.metadata("confidence", answer.confidence().name());
             finalResponse.metadata("answerLength", answer.answer().length());
+            finalResponse.metadata("responseStatus", responseStatus.name());
+            if (pendingActionDetails != null) {
+                finalResponse.metadata("pendingActionId", pendingActionDetails.pendingActionId());
+                finalResponse.metadata("tool", pendingActionDetails.tool());
+                finalResponse.metadata("confirmationStatus", pendingActionDetails.confirmationStatus().name());
+                finalResponse.metadata("executionStatus", pendingActionDetails.executionStatus());
+                finalResponse.metadata("loopStoppedForConfirmation",
+                        responseStatus == AssistantResponseStatus.CONFIRMATION_REQUIRED);
+            }
             log.info("Assistant flow completed: confidence={}", answer.confidence());
         }
 
-        return answer;
+        return new AssistantFlowResult(answer, responseStatus, pendingActionDetails);
     }
+
+    private PendingActionDetails details(com.mykyta.model.PendingAction action, boolean confirmationRequired,
+                                         String executionStatus, String message) {
+        return new PendingActionDetails(action.actionId(), action.toolName(), action.arguments(),
+                confirmationRequired, action.status(), executionStatus, message);
+    }
+
+    private record AssistantFlowResult(AssistantResponse response, AssistantResponseStatus status,
+                                       PendingActionDetails pendingAction) { }
 
 }

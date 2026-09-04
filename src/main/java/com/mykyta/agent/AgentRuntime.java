@@ -91,6 +91,18 @@ public class AgentRuntime {
                     for (ToolCall call : calls) {
                         ToolResult result = registry.execute(call);
                         toolExecutions++;
+                        if (result.confirmationRequired() != null) {
+                            iterationSpan.metadata("loopStopped", true);
+                            iterationSpan.metadata("stopReason", "CONFIRMATION_REQUIRED");
+                            iterationSpan.metadata("pendingActionId", result.confirmationRequired().pendingActionId());
+                            agentSpan.metadata("loopStopped", true);
+                            agentSpan.metadata("stopReason", "CONFIRMATION_REQUIRED");
+                            agentSpan.metadata("pendingActionId", result.confirmationRequired().pendingActionId());
+                            return new AgentResult(
+                                    new AssistantResponse(result.confirmationRequired().message(),
+                                            com.mykyta.model.Confidence.HIGH),
+                                    iteration, toolExecutions, result.confirmationRequired());
+                        }
                         String toolName = call.function() == null ? "unknown" : call.function().name();
                         context.add(new LLMMessage("tool", result.asObservation(), null, toolName));
                     }
